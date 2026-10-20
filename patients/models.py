@@ -4,13 +4,25 @@ assurances, partage de dossier, index de rapprochement.
 """
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
-from core.models import EtablissementScopedModel, uuid_pk_field
+from core.models import EtablissementScopedModel, ValidateOnSaveMixin, uuid_pk_field
 from etablissements.models import Etablissement
 
 
-class Client(EtablissementScopedModel):
+def _verifier_type_etablissement(instance, type_attendu, message):
+    """
+    Vérifie le type de l'établissement porteur. Ne fait rien si id_etablissement
+    est vide : full_clean() signale déjà ce champ obligatoire, et l'accès à
+    instance.id_etablissement lèverait sinon RelatedObjectDoesNotExist (erreur 500).
+    """
+    if instance.id_etablissement_id is None:
+        return
+    if instance.id_etablissement.type_etablissement != type_attendu:
+        raise ValidationError(message)
+
+
+class Client(ValidateOnSaveMixin, EtablissementScopedModel):
     """
     Identifiant : id_client — artificiel (UUID).
     Fiche volontairement légère (RG31) : pas de table Téléphone dédiée
@@ -32,11 +44,12 @@ class Client(EtablissementScopedModel):
         return f"{self.nom} {self.prenom}".strip()
 
     def clean(self):
-        if self.id_etablissement.type_etablissement != Etablissement.TYPE_PHARMACIE:
-            raise ValidationError("Un client ne peut être enregistré que dans une pharmacie.")
+        _verifier_type_etablissement(
+            self, Etablissement.TYPE_PHARMACIE, "Un client ne peut être enregistré que dans une pharmacie."
+        )
 
 
-class Patient(EtablissementScopedModel):
+class Patient(ValidateOnSaveMixin, EtablissementScopedModel):
     """
     Identifiant : id_patient — artificiel (UUID).
     Reste propre à un seul hôpital (dossier non partagé).
@@ -78,36 +91,42 @@ class Patient(EtablissementScopedModel):
         return f"{self.nom_patient} {self.prenom_patient}"
 
     def clean(self):
-        if self.id_etablissement.type_etablissement != Etablissement.TYPE_HOPITAL:
-            raise ValidationError("Un patient ne peut être enregistré que dans un hôpital.")
+        _verifier_type_etablissement(
+            self, Etablissement.TYPE_HOPITAL, "Un patient ne peut être enregistré que dans un hôpital."
+        )
 
     def save(self, *args, **kwargs):
         """
         RG35-RG37 : alimente automatiquement INDEX_RAPPROCHEMENT à la
         création ET à la mise à jour du patient.
+
+        Les deux écritures (patient puis index) sont dans une même transaction :
+        si la seconde échoue, le patient n'est pas créé — jamais de patient
+        sans entrée d'index.
         """
-        super().save(*args, **kwargs)
-        numero = self.numero_piece_identite
-        if numero:
-            IndexRapprochement.objects.update_or_create(
-                id_patient=self,
-                defaults={
-                    "numero_piece_identite": numero,
-                    "id_etablissement": self.id_etablissement,
-                },
-            )
-        else:
-            IndexRapprochement.objects.filter(id_patient=self).delete()
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            numero = self.numero_piece_identite
+            if numero:
+                IndexRapprochement.objects.update_or_create(
+                    id_patient=self,
+                    defaults={
+                        "numero_piece_identite": numero,
+                        "id_etablissement": self.id_etablissement,
+                    },
+                )
+            else:
+                IndexRapprochement.objects.filter(id_patient=self).delete()
 
 
-class Telephone(EtablissementScopedModel):
+class Telephone(ValidateOnSaveMixin, EtablissementScopedModel):
     """
     Donnée multivaluée du Patient (mise en 1FN). Identifiant de
     substitution : id_telephone — UUID.
 
-    Écart volontaire au dictionnaire de données : id_etablissement n'y est
-    pas listé pour cette table (déductible via id_patient), mais on le
-    garde en direct pour pouvoir lui appliquer la même policy RLS qu'à
+    Écart volontaire au dictionnaire de données v1.1 (inscrit en v1.2) :
+    id_etablissement n'y était pas listé (déductible via id_patient), mais on
+    le garde en direct pour pouvoir lui appliquer la même policy RLS qu'à
     Patient — un numéro de téléphone reste une donnée personnelle sensible.
     """
 
@@ -135,8 +154,16 @@ class Telephone(EtablissementScopedModel):
     def __str__(self):
         return f"{self.numero_telephone} ({self.type_telephone})"
 
+    def clean(self):
+        # id_etablissement est dupliqué par rapport au patient : les deux
+        # doivent rester identiques.
+        if self.id_etablissement_id is None or self.id_patient_id is None:
+            return
+        if self.id_patient.id_etablissement_id != self.id_etablissement_id:
+            raise ValidationError("Le téléphone doit appartenir au même établissement que son patient.")
 
-class Assurance(EtablissementScopedModel):
+
+class Assurance(ValidateOnSaveMixin, EtablissementScopedModel):
     """
     Identifiant : id_assurance — artificiel (UUID).
     Propre à chaque hôpital (taux négociés séparément).
@@ -155,17 +182,23 @@ class Assurance(EtablissementScopedModel):
             models.UniqueConstraint(
                 fields=["numero_police", "id_etablissement"],
                 name="uniq_assurance_police_etablissement",
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(taux_prise_en_charge__gte=0, taux_prise_en_charge__lte=100),
+                name="chk_assurance_taux_0_100",
+                violation_error_message="Le taux de prise en charge doit être compris entre 0 et 100.",
+            ),
         ]
 
     def __str__(self):
         return f"{self.nom_assureur} — police {self.numero_police}"
 
     def clean(self):
-        if self.id_etablissement.type_etablissement != Etablissement.TYPE_HOPITAL:
-            raise ValidationError("Une assurance ne peut être enregistrée que dans un hôpital.")
-        if not (0 <= self.taux_prise_en_charge <= 100):
-            raise ValidationError("Le taux de prise en charge doit être compris entre 0 et 100.")
+        # Le taux 0-100 est garanti par la CheckConstraint (vérifiée par full_clean
+        # et par la base) ; il n'est plus testé ici.
+        _verifier_type_etablissement(
+            self, Etablissement.TYPE_HOPITAL, "Une assurance ne peut être enregistrée que dans un hôpital."
+        )
 
 
 class PartageDossier(models.Model):
@@ -176,19 +209,28 @@ class PartageDossier(models.Model):
     n'hérite PAS de EtablissementScopedModel (il est intrinsèquement
     inter-établissements). Hors RLS : le filtrage par établissement
     concerné devra être fait explicitement dans les vues/serializers.
+    (Exception validée et consignée avec Personnel et Établissement — voir
+    MediHub_Modele_Donnees_Technique_v1.2, section « Isolation RLS ».)
+
+    Preuve de consentement (RG37) : les clés vers Patient sont en PROTECT —
+    on ne peut pas supprimer un patient impliqué dans un partage, ce qui
+    effacerait la trace du consentement. Un même patient destinataire ne peut
+    recevoir qu'un seul partage (RG36 « une seule fois »), garanti en base.
+
+    Création : uniquement via patients.services.partager_dossier().
     """
 
     id_partage = uuid_pk_field()
     date_partage = models.DateTimeField(auto_now_add=True)
     id_patient_source = models.ForeignKey(
         Patient,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         db_column="id_patient_source",
         related_name="partages_issus",
     )
     id_patient_destination = models.ForeignKey(
         Patient,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         db_column="id_patient_destination",
         related_name="partages_recus",
     )
@@ -204,6 +246,17 @@ class PartageDossier(models.Model):
         db_table = "partage_dossier"
         verbose_name = "Partage de dossier"
         verbose_name_plural = "Partages de dossier"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["id_patient_destination"],
+                name="uniq_partage_patient_destination",
+                violation_error_message="Ce dossier a déjà reçu un partage (RG36 : une seule fois).",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(id_patient_source=models.F("id_patient_destination")),
+                name="chk_partage_source_ne_destination",
+            ),
+        ]
 
     def __str__(self):
         return f"Partage {self.id_patient_source_id} → {self.id_patient_destination_id}"

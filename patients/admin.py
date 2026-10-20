@@ -46,8 +46,22 @@ class AssuranceAdmin(admin.ModelAdmin):
 
 @admin.register(PartageDossier)
 class PartageDossierAdmin(admin.ModelAdmin):
+    """
+    Consultation seule : la preuve de consentement (RG37) est créée uniquement par
+    patients.services.partager_dossier() et ne se modifie ni ne se supprime.
+    """
+
     list_display = ("id_patient_source", "id_patient_destination", "matricule_personnel", "date_partage")
     readonly_fields = ("date_partage",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(IndexRapprochement)

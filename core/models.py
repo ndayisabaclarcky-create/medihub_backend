@@ -28,3 +28,24 @@ class EtablissementScopedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class ValidateOnSaveMixin(models.Model):
+    """
+    Exécute full_clean() (champs, clean(), contraintes) avant chaque save().
+
+    Sans cela, clean() et les validateurs ne tournent que via l'admin ou les
+    ModelForm : un enregistrement direct (shell, API/serializer, script) les
+    contournerait. Les violations remontent alors en ValidationError plutôt
+    qu'en erreur de base de données brute.
+
+    N'est PAS utilisé sur PartageDossier : full_clean() y vérifierait l'existence
+    du patient source, que la RLS rend invisible depuis l'hôpital destinataire.
+    """
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
