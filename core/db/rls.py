@@ -7,8 +7,9 @@ Contenu :
                           d'une table à tous les établissements (voir ci-dessous).
 - temporary_tenant()    : bascule transactionnelle et réversible du contexte
                           d'établissement. À n'utiliser que dans les fonctions
-                          de patients/services.py (point de passage unique et
-                          auditable de l'exception RG36).
+                          auditées de patients/services.py (RG36) et
+                          pharmacie/services.py (validation d'une ordonnance
+                          remise à la pharmacie rattachée à son hôpital).
 """
 
 from contextlib import contextmanager
