@@ -22,8 +22,11 @@ from core.views import SessionAPIView
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/session/', SessionAPIView.as_view(), name='api-session'),
-    path('api/bloc1/', include('etablissements.urls')),
-    path('api/bloc2/', include('patients.urls')),
-    path('api/bloc3/', include('soins.urls')),
+    path('api/etablissements/', include('etablissements.urls')),
+    path('api/patients/', include('patients.urls')),
+    path('api/soins/', include('soins.urls')),
+    path('api/laboratoire/', include('laboratoire.urls')),
+    path('api/facturation/', include('facturation.urls')),
+    path('api/portail/', include('portail_patient.urls')),
     path('', include('pharmacie.urls')),
 ]

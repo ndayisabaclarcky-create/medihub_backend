@@ -13,12 +13,12 @@ from etablissements.views import (
 
 
 router = DefaultRouter()
-router.register("etablissement", EtablissementCourantViewSet, basename="etablissement-courant")
 router.register("personnel", PersonnelViewSet, basename="personnel")
 router.register("medecins", MedecinViewSet, basename="medecin")
 router.register("services", ServiceViewSet, basename="service")
 router.register("affectations", AffectationViewSet, basename="affectation")
 router.register("journal", JournalActionViewSet, basename="journal-action")
+router.register("", EtablissementCourantViewSet, basename="etablissement-courant")
 
 urlpatterns = router.urls + [
     path("provisionner/", ProvisionnerEtablissementAPIView.as_view(), name="provisionner-etablissement"),

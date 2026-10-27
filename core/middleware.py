@@ -23,6 +23,11 @@ class EtablissementContextMiddleware:
         id_etablissement = None
         if user is not None and getattr(user, "is_authenticated", False):
             id_etablissement = getattr(user, "id_etablissement_id", None)
+        elif getattr(request, "session", None):
+            # Après vérification OTP, le portail ne crée pas de compte Personnel :
+            # la session donne uniquement le tenant du patient authentifié.
+            if request.session.get("portail_patient_id"):
+                id_etablissement = request.session.get("portail_hopital_id")
 
         with transaction.atomic():
             with connection.cursor() as cursor:
