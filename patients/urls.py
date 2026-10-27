@@ -13,11 +13,11 @@ from patients.views import (
 
 router = DefaultRouter()
 router.register("clients", ClientViewSet, basename="client")
-router.register("patients", PatientViewSet, basename="patient")
 router.register("telephones", TelephoneViewSet, basename="telephone")
 router.register("assurances", AssuranceViewSet, basename="assurance")
 router.register("partages", PartageDossierViewSet, basename="partage-dossier")
+router.register("", PatientViewSet, basename="patient")
 
 urlpatterns = router.urls + [
-    path("patients/<uuid:id_patient>/partager/", PartagerDossierAPIView.as_view(), name="partager-dossier"),
+    path("<uuid:id_patient>/partager/", PartagerDossierAPIView.as_view(), name="partager-dossier"),
 ]

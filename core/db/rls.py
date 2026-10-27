@@ -9,7 +9,11 @@ Contenu :
                           d'établissement. À n'utiliser que dans les fonctions
                           auditées de patients/services.py (RG36) et
                           pharmacie/services.py (validation d'une ordonnance
-                          remise à la pharmacie rattachée à son hôpital).
+                          remise à la pharmacie rattachée à son hôpital), ainsi
+                          que facturation/services.py pour lire les seules lignes
+                          délivrées des pharmacies rattachées lors d'une facture
+                          et portail_patient/services.py pour rechercher un numéro
+                          de téléphone dans le tenant hôpital choisi avant l'OTP.
 """
 
 from contextlib import contextmanager

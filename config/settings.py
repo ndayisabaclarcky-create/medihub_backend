@@ -25,6 +25,7 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key-change-me")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "False") == "True"
+PORTAIL_CODE_DEMO = os.environ.get("PORTAIL_CODE_DEMO", str(DEBUG)) == "True"
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
@@ -45,6 +46,9 @@ INSTALLED_APPS = [
     "patients",
     "soins",
     "pharmacie",
+    "laboratoire",
+    "facturation",
+    "portail_patient",
 ]
 
 MIDDLEWARE = [
