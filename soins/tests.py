@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError, connection, transaction
+from django.utils import timezone
 
 from core.testing import RLSTestCase
 from etablissements.models import Etablissement, Medecin, Personnel, Service
@@ -230,6 +231,35 @@ class RendezVousTests(BaseBloc3):
         with self.assertRaises(ValidationError) as cm:
             rdv.save()
         self.assertIn("id_etablissement", cm.exception.message_dict)
+
+
+class RendezVousAnnulationRG07Tests(BaseBloc3):
+    def rdv_futur(self):
+        debut = timezone.localtime(timezone.now()) + datetime.timedelta(days=2)
+        debut = debut.replace(second=0, microsecond=0)
+        rdv = RendezVous.objects.create(
+            date_rendez_vous=debut.date(),
+            heure_rendez_vous=debut.time().replace(tzinfo=None),
+            id_patient=self.patient_a2,
+            matricule_personnel=self.medecin_a,
+            id_etablissement=self.hopital_a,
+        )
+        return rdv, debut
+
+    def test_exactement_deux_heures_avant_est_une_annulation_normale(self):
+        rdv, debut = self.rdv_futur()
+        rdv.annuler(maintenant=debut - datetime.timedelta(hours=2))
+        self.assertEqual(rdv.statut_rendez_vous, RendezVous.ANNULE)
+
+    def test_moins_de_deux_heures_avant_devient_absent(self):
+        rdv, debut = self.rdv_futur()
+        rdv.annuler(maintenant=debut - datetime.timedelta(hours=1, minutes=59))
+        self.assertEqual(rdv.statut_rendez_vous, RendezVous.ABSENT)
+
+    def test_apres_le_creneau_devient_absent(self):
+        rdv, debut = self.rdv_futur()
+        rdv.annuler(maintenant=debut + datetime.timedelta(minutes=1))
+        self.assertEqual(rdv.statut_rendez_vous, RendezVous.ABSENT)
 
 
 class ActeEtConsultationTests(BaseBloc3):

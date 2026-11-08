@@ -3,6 +3,7 @@ from datetime import datetime
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
+from django.http import Http404
 from django.middleware.csrf import rotate_token
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -23,6 +24,7 @@ from portail_patient.serializers import (
     RendezVousPortailSerializer,
     VerifierCodeSerializer,
 )
+from portail_patient.documents import lister_documents, reponse_document
 from portail_patient.services import (
     MESSAGE_CODE_INVALIDE,
     PortailPatientError,
@@ -168,6 +170,45 @@ class MedecinsPortailAPIView(APIView):
         except PortailPatientError as exc:
             raise serializers.ValidationError(str(exc)) from exc
         return Response(MedecinPortailSerializer(medecins, many=True).data)
+
+
+class DocumentsPatientAPIView(APIView):
+    permission_classes = (SessionPatientValide,)
+
+    def _patient(self, request):
+        try:
+            return patient_portail_connecte(
+                session=request.session,
+                id_hopital=request.session.get("portail_hopital_id"),
+            )
+        except PortailPatientError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+    def get(self, request):
+        patient = self._patient(request)
+        return Response(lister_documents(patient))
+
+
+class DocumentPatientAPIView(DocumentsPatientAPIView):
+    def get(self, request, type_document, id_document):
+        patient = self._patient(request)
+        return reponse_document(
+            patient=patient,
+            type_document=type_document,
+            id_document=id_document,
+            telecharger=False,
+        )
+
+
+class TelechargerDocumentPatientAPIView(DocumentsPatientAPIView):
+    def get(self, request, type_document, id_document):
+        patient = self._patient(request)
+        return reponse_document(
+            patient=patient,
+            type_document=type_document,
+            id_document=id_document,
+            telecharger=True,
+        )
 
 
 @method_decorator(csrf_protect, name="dispatch")

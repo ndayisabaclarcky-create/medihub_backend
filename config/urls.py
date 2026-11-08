@@ -28,5 +28,8 @@ urlpatterns = [
     path('api/laboratoire/', include('laboratoire.urls')),
     path('api/facturation/', include('facturation.urls')),
     path('api/portail/', include('portail_patient.urls')),
+    path('api/partenariats/', include('partenariats.urls')),
+    path('api/equipements/', include('equipements.urls')),
+    path('api/statistiques/', include('statistiques.urls')),
     path('', include('pharmacie.urls')),
 ]
