@@ -49,6 +49,9 @@ INSTALLED_APPS = [
     "laboratoire",
     "facturation",
     "portail_patient",
+    "partenariats",
+    "equipements",
+    "statistiques",
 ]
 
 MIDDLEWARE = [
