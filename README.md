@@ -126,8 +126,36 @@ PostgreSQL est requis : plusieurs protections, dont la Row-Level Security, repos
 
 ## Configuration du frontend
 
-Pour un frontend exécuté sur une autre origine en développement, ajoute son origine exacte à `CORS_ALLOWED_ORIGINS` dans `.env`, par exemple `http://localhost:3000`. Les cookies de session nécessitent une configuration cohérente de CORS, CSRF et des cookies pour l’environnement cible. Les secrets, l’origine du frontend et les hôtes autorisés devront être configurés séparément pour le déploiement.
+Les origines locales Vite (`http://localhost:5173`) et Next.js (`http://localhost:3000`) sont autorisées par défaut. Après avoir copié `.env.example`, la variable `CORS_ALLOWED_ORIGINS` doit conserver les deux origines, séparées par une virgule. Redémarre Django après toute modification de `.env`.
+
+Les deux frontends utilisent l'authentification par session : les appels doivent inclure les cookies (`credentials: "include"` dans `fetch` ou `withCredentials: true` avec Axios). Pour les opérations d'écriture, le frontend doit d'abord récupérer le cookie `csrftoken` puis le renvoyer dans l'en-tête `X-CSRFToken`. Le portail patient possède sa propre session OTP ; il ne faut pas la remplacer par le compte du personnel.
+
+Routes du portail à connecter : `GET /api/portail/hopitaux/`, `POST /api/portail/codes/demander/`, `POST /api/portail/codes/verifier/`, `GET /api/portail/session/`, `GET /api/portail/profil/`, `GET /api/portail/documents/` et `GET /api/portail/medecins/`. Le profil patient renvoie les allergies, les antécédents, le groupe sanguin, les mesures de poids datées et le médecin référent (nom, prénom, spécialité et photo si configurée). Les URLs de photo peuvent être temporaires lorsque le bucket privé émet des liens signés.
+
+En développement, les photos sont stockées dans `./media`. Pour Railway, configure un stockage objet S3 compatible en renseignant `AWS_STORAGE_BUCKET_NAME`, `AWS_S3_ENDPOINT_URL`, `AWS_S3_REGION_NAME`, `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY`. Ne mets jamais les identifiants du bucket dans le frontend ou dans Git. Le domaine du bucket devra aussi être autorisé par la configuration d'images du frontend Next.js.
+
+Pour le déploiement, ajoute les origines HTTPS exactes à `CORS_ALLOWED_ORIGINS` (cette liste sert aussi à `CSRF_TRUSTED_ORIGINS`) ainsi que le domaine backend dans `ALLOWED_HOSTS`. Les cookies cross-site doivent être configurés en HTTPS avec `SameSite=None` et `Secure=True` si frontend et backend sont sur des domaines distincts.
 
 ## Postman
 
 Les collections et réglages Postman locaux ne sont pas nécessaires à l’exécution du backend et ne sont pas inclus dans le dépôt. Crée une collection locale et n’y exporte jamais de mot de passe, cookie de session ou secret réel.
+
+
+### Compte patient et partage entre h?pitaux
+
+Le patient peut cr?er un compte ind?pendant, confirmer son num?ro par code, puis se connecter avec identifiant et mot de passe suivi d'un code ? usage unique. Chaque rendez-vous dans un nouvel h?pital cr?e un dossier local s?par?. Depuis son compte, le patient peut choisir un dossier source, un h?pital de destination o? il a d?j? un dossier, donner son consentement explicite, puis partager une copie fig?e du r?sum? m?dical et des r?sultats, prescriptions ou factures s?lectionn?s. Les dossiers restent propres ? chaque h?pital ; le partage re?u est un instantan? consultable par le patient et l'?quipe soignante du nouvel h?pital. Les urgences sans compte restent enregistrables par le personnel comme auparavant.
+
+Routes du compte patient (les requ?tes d'?criture n?cessitent les cookies de session et CSRF) :
+
+- `POST /api/portail/compte/inscription/` : `identifiant_connexion`, `nom`, `prenom`, `date_naissance`, `sexe`, `numero_telephone`, `password`; allergies/ant?c?dents/groupe sanguin d?clar?s sont facultatifs.
+- `POST /api/portail/compte/codes/verifier/` : `id_code`, `code` re?us apr?s inscription ou connexion.
+- `POST /api/portail/compte/connexion/` : identifiant et mot de passe, puis v?rification du code.
+- `GET /api/portail/compte/dossiers/` : h?pitaux o? le compte a d?j? un dossier local.
+- `GET /api/portail/medecins/?id_hopital={uuid}` : m?decins actifs de cet h?pital.
+- `GET /api/portail/compte/disponibilite/?id_hopital={uuid}&matricule_personnel={uuid}&date_rendez_vous=AAAA-MM-JJ&heure_rendez_vous=HH:MM` : v?rifie un cr?neau.
+- `POST /api/portail/compte/rendez-vous/{id_hopital}/` : `matricule_personnel`, `date_rendez_vous`, `heure_rendez_vous`; cr?e le dossier local si n?cessaire.
+- `POST /api/portail/compte/partages/historique/` : `id_hopital_source`, `id_hopital_destination`, `consentement: true`, et `documents` facultatifs (`type_document` parmi `resultat_examen`, `prescription`, `facture` et `id_document`). Le dossier du patient doit d'abord exister ? l'h?pital destinataire.
+- `GET /api/portail/profil/?id_hopital={uuid}` : profil et instantan?s re?us pour ce dossier.
+- `GET /api/portail/documents/?id_hopital={uuid}` puis `/api/portail/documents/{type_document}/{id_document}/` ou `/telecharger/` : consulter ou t?l?charger les documents, y compris les copies re?ues.
+
+La livraison SMS n'est pas configur?e par ce code. `PORTAIL_CODE_DEMO=True` expose un code simul? uniquement pour le d?veloppement ; avant une d?monstration publique, int?grer un fournisseur SMS, d?sactiver ce mode et configurer les cookies HTTPS/CORS du d?ploiement. Le rapprochement automatique des dossiers d'urgence pr?existants n'est pas fait : un dossier cr?? sans compte doit ?tre li? de fa?on v?rifi?e par l'h?pital avant d'?tre partageable depuis un compte patient.

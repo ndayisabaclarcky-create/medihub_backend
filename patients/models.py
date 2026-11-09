@@ -4,10 +4,12 @@ assurances, partage de dossier, index de rapprochement.
 """
 
 from django.core.exceptions import ValidationError
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import models, transaction
+from django.utils import timezone
 
 from core.models import EtablissementScopedModel, ValidateOnSaveMixin, uuid_pk_field
-from etablissements.models import Etablissement
+from etablissements.models import Etablissement, Medecin, Personnel
 
 
 def _verifier_type_etablissement(instance, type_attendu, message):
@@ -20,6 +22,72 @@ def _verifier_type_etablissement(instance, type_attendu, message):
         return
     if instance.id_etablissement.type_etablissement != type_attendu:
         raise ValidationError(message)
+
+
+class ComptePatient(models.Model):
+    """Compte MediHub global ; les dossiers cliniques restent propres aux hôpitaux."""
+
+    SEXE_CHOICES = [("M", "Masculin"), ("F", "Féminin")]
+
+    id_compte_patient = uuid_pk_field()
+    identifiant_connexion = models.CharField(max_length=50, unique=True)
+    nom = models.CharField(max_length=50)
+    prenom = models.CharField(max_length=50)
+    date_naissance = models.DateField()
+    sexe = models.CharField(max_length=1, choices=SEXE_CHOICES)
+    numero_telephone = models.CharField(max_length=20, unique=True)
+    mot_de_passe = models.CharField(max_length=128)
+    telephone_verifie = models.BooleanField(default=False)
+    actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    # Informations déclarées par le patient, conservées distinctement des dossiers cliniques vérifiés.
+    allergies_declarees = models.CharField(max_length=500, blank=True)
+    antecedents_declares = models.CharField(max_length=1000, blank=True)
+    groupe_sanguin_declare = models.CharField(max_length=3, blank=True, null=True)
+
+    class Meta:
+        db_table = "compte_patient"
+        verbose_name = "Compte patient MediHub"
+        verbose_name_plural = "Comptes patients MediHub"
+
+    def set_password(self, raw_password):
+        self.mot_de_passe = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        return check_password(raw_password, self.mot_de_passe)
+
+    def __str__(self):
+        return f"{self.prenom} {self.nom} ({self.identifiant_connexion})"
+
+
+class CodeComptePatient(models.Model):
+    """OTP à usage unique pour activer un compte ou confirmer une connexion."""
+
+    INSCRIPTION = "inscription"
+    CONNEXION = "connexion"
+    USAGE_CHOICES = [(INSCRIPTION, "Activation"), (CONNEXION, "Connexion")]
+
+    id_code = uuid_pk_field()
+    id_compte_patient = models.ForeignKey(
+        ComptePatient, on_delete=models.CASCADE, related_name="codes_verification"
+    )
+    usage = models.CharField(max_length=15, choices=USAGE_CHOICES)
+    code_hash = models.CharField(max_length=128)
+    date_generation = models.DateTimeField(default=timezone.now)
+    date_expiration = models.DateTimeField()
+    tentatives = models.PositiveSmallIntegerField(default=0)
+    utilise = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "code_compte_patient"
+        ordering = ("-date_generation",)
+
+    def verifier(self, code):
+        return check_password(code, self.code_hash)
+
+    def __str__(self):
+        return f"Code {self.usage} pour {self.id_compte_patient_id}"
 
 
 class Client(ValidateOnSaveMixin, EtablissementScopedModel):
@@ -56,8 +124,19 @@ class Patient(ValidateOnSaveMixin, EtablissementScopedModel):
     """
 
     SEXE_CHOICES = [("M", "Masculin"), ("F", "Féminin")]
+    GROUPE_SANGUIN_CHOICES = [
+        ("A+", "A+"), ("A-", "A-"), ("B+", "B+"), ("B-", "B-"),
+        ("AB+", "AB+"), ("AB-", "AB-"), ("O+", "O+"), ("O-", "O-"),
+    ]
 
     id_patient = uuid_pk_field()
+    compte_patient = models.ForeignKey(
+        ComptePatient,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="dossiers_hospitaliers",
+    )
     nom_patient = models.CharField(max_length=40)
     prenom_patient = models.CharField(max_length=40)
     date_naissance = models.DateField()
@@ -71,6 +150,15 @@ class Patient(ValidateOnSaveMixin, EtablissementScopedModel):
     )
     allergies = models.CharField(max_length=300, blank=True, null=True)
     antecedents_medicaux = models.CharField(max_length=300, blank=True, null=True)
+    groupe_sanguin = models.CharField(max_length=3, choices=GROUPE_SANGUIN_CHOICES, blank=True, null=True)
+    medecin_referent = models.ForeignKey(
+        "etablissements.Medecin",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column="matricule_medecin_referent",
+        related_name="patients_referents",
+    )
     id_assurance = models.ForeignKey(
         "Assurance",
         on_delete=models.SET_NULL,
@@ -94,6 +182,13 @@ class Patient(ValidateOnSaveMixin, EtablissementScopedModel):
         _verifier_type_etablissement(
             self, Etablissement.TYPE_HOPITAL, "Un patient ne peut être enregistré que dans un hôpital."
         )
+        if self.medecin_referent_id and self.id_etablissement_id:
+            medecin_du_meme_hopital = Medecin.objects.filter(
+                pk=self.medecin_referent_id,
+                matricule_personnel__id_etablissement_id=self.id_etablissement_id,
+            ).exists()
+            if not medecin_du_meme_hopital:
+                raise ValidationError("Le médecin référent doit appartenir au même hôpital que le patient.")
 
     def save(self, *args, **kwargs):
         """
@@ -117,6 +212,102 @@ class Patient(ValidateOnSaveMixin, EtablissementScopedModel):
                 )
             else:
                 IndexRapprochement.objects.filter(id_patient=self).delete()
+
+
+class MesurePoids(ValidateOnSaveMixin, EtablissementScopedModel):
+    """Mesure de poids datée, conservée pour suivre l'évolution du patient."""
+
+    id_mesure_poids = uuid_pk_field()
+    poids_kg = models.DecimalField(max_digits=5, decimal_places=2)
+    date_mesure = models.DateTimeField(auto_now_add=True)
+    id_patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        db_column="id_patient",
+        related_name="mesures_poids",
+    )
+    matricule_personnel = models.ForeignKey(
+        "etablissements.Personnel",
+        on_delete=models.PROTECT,
+        db_column="matricule_personnel",
+        related_name="mesures_poids_enregistrees",
+    )
+
+    class Meta:
+        db_table = "mesure_poids_patient"
+        verbose_name = "Mesure du poids patient"
+        verbose_name_plural = "Mesures du poids patient"
+        ordering = ("-date_mesure",)
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(poids_kg__gt=0, poids_kg__lte=500),
+                name="chk_mesure_poids_0_500",
+            ),
+        ]
+
+    def clean(self):
+        if self.id_patient_id and not Patient.objects.filter(
+            pk=self.id_patient_id, id_etablissement_id=self.id_etablissement_id
+        ).exists():
+            raise ValidationError("La mesure doit appartenir au même hôpital que le patient.")
+        if self.matricule_personnel_id and not Personnel.objects.filter(
+            pk=self.matricule_personnel_id, id_etablissement_id=self.id_etablissement_id
+        ).exists():
+            raise ValidationError("Le professionnel doit appartenir au même hôpital que la mesure.")
+
+
+class HistoriqueMedicalPartage(ValidateOnSaveMixin, EtablissementScopedModel):
+    """Instantané consenti d'un résumé médical reçu par un hôpital."""
+
+    id_historique_partage = uuid_pk_field()
+    id_compte_patient = models.ForeignKey(
+        ComptePatient, on_delete=models.PROTECT, related_name="historiques_partages"
+    )
+    id_patient_source = models.UUIDField()
+    id_etablissement_source = models.UUIDField()
+    id_patient_destination = models.ForeignKey(
+        Patient, on_delete=models.PROTECT, db_column="id_patient_destination",
+        related_name="historiques_medicaux_recus",
+    )
+    resume_medical = models.JSONField(default=dict)
+    date_consentement = models.DateTimeField(auto_now_add=True)
+    version_consentement = models.CharField(max_length=20, default="v1")
+
+    class Meta:
+        db_table = "historique_medical_partage"
+        ordering = ("-date_consentement",)
+
+    def clean(self):
+        if self.id_patient_destination_id and self.id_etablissement_id:
+            if not Patient.objects.filter(
+                pk=self.id_patient_destination_id,
+                id_etablissement_id=self.id_etablissement_id,
+                compte_patient_id=self.id_compte_patient_id,
+            ).exists():
+                raise ValidationError("Le dossier destinataire doit être lié au compte patient connecté.")
+        if self.id_etablissement_source == self.id_etablissement_id:
+            raise ValidationError("Le partage doit provenir d'un autre hôpital.")
+
+
+class DocumentMedicalPartage(ValidateOnSaveMixin, EtablissementScopedModel):
+    """Copie PDF figée d'un document sélectionné par le patient."""
+
+    id_document_partage = uuid_pk_field()
+    historique = models.ForeignKey(
+        HistoriqueMedicalPartage, on_delete=models.CASCADE, related_name="documents"
+    )
+    type_document_source = models.CharField(max_length=20)
+    id_document_source = models.UUIDField()
+    titre = models.CharField(max_length=150)
+    date_document = models.DateField(blank=True, null=True)
+    contenu_pdf = models.BinaryField()
+
+    class Meta:
+        db_table = "document_medical_partage"
+
+    def clean(self):
+        if self.historique_id and self.id_etablissement_id != self.historique.id_etablissement_id:
+            raise ValidationError("Le document partagé et son historique doivent appartenir au même hôpital.")
 
 
 class Telephone(ValidateOnSaveMixin, EtablissementScopedModel):

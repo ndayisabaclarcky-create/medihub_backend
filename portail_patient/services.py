@@ -3,13 +3,15 @@
 import secrets
 from datetime import datetime, timedelta
 
+from django.contrib.auth.hashers import make_password
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from core.db.rls import current_tenant, temporary_tenant
 from etablissements.models import Etablissement, Medecin
-from patients.models import Patient, Telephone
+from patients.models import CodeComptePatient, ComptePatient, Patient, Telephone
 from portail_patient.models import CodeVerification
 from soins.models import RendezVous
 
@@ -19,6 +21,78 @@ class PortailPatientError(Exception):
 
 
 MESSAGE_CODE_INVALIDE = "Code invalide ou expiré. Demandez un nouveau code."
+
+
+def _creer_code_compte(compte, usage):
+    CodeComptePatient.objects.filter(
+        id_compte_patient=compte, usage=usage, utilise=False
+    ).update(utilise=True)
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    maintenant = timezone.now()
+    challenge = CodeComptePatient.objects.create(
+        id_compte_patient=compte,
+        usage=usage,
+        code_hash=make_password(code),
+        date_generation=maintenant,
+        date_expiration=maintenant + timedelta(minutes=5),
+    )
+    return challenge, code
+
+
+@transaction.atomic
+def inscrire_compte_patient(*, donnees):
+    """Crée un compte patient non activé et prépare la vérification du téléphone."""
+    password = donnees.pop("password")
+    compte = ComptePatient(**donnees)
+    validate_password(password, user=compte)
+    compte.set_password(password)
+    compte.full_clean()
+    compte.save()
+    challenge, code = _creer_code_compte(compte, CodeComptePatient.INSCRIPTION)
+    return compte, challenge, code
+
+
+@transaction.atomic
+def demander_code_connexion_patient(*, identifiant_connexion, password):
+    compte = ComptePatient.objects.filter(
+        identifiant_connexion__iexact=identifiant_connexion.strip(),
+        actif=True,
+        telephone_verifie=True,
+    ).first()
+    # Vérification hashée également pour identifiants inconnus afin d'éviter
+    # une réponse triviale qui confirme l'existence d'un compte.
+    if compte is None or not compte.check_password(password):
+        raise PortailPatientError("Identifiant ou mot de passe invalide.")
+    challenge, code = _creer_code_compte(compte, CodeComptePatient.CONNEXION)
+    return compte, challenge, code
+
+
+@transaction.atomic
+def verifier_code_compte_patient(*, id_code, code, usage):
+    try:
+        challenge = CodeComptePatient.objects.select_for_update().select_related(
+            "id_compte_patient"
+        ).get(pk=id_code, usage=usage, utilise=False)
+    except CodeComptePatient.DoesNotExist as exc:
+        raise PortailPatientError(MESSAGE_CODE_INVALIDE) from exc
+    if challenge.date_expiration <= timezone.now() or challenge.tentatives >= 5:
+        challenge.utilise = True
+        challenge.save(update_fields=("utilise",))
+        raise PortailPatientError(MESSAGE_CODE_INVALIDE)
+    challenge.tentatives += 1
+    valide = challenge.verifier(code)
+    if not valide:
+        if challenge.tentatives >= 5:
+            challenge.utilise = True
+        challenge.save(update_fields=("tentatives", "utilise"))
+        raise PortailPatientError(MESSAGE_CODE_INVALIDE)
+    challenge.utilise = True
+    challenge.save(update_fields=("tentatives", "utilise"))
+    compte = challenge.id_compte_patient
+    if usage == CodeComptePatient.INSCRIPTION:
+        compte.telephone_verifie = True
+        compte.save(update_fields=("telephone_verifie",))
+    return compte
 
 
 @transaction.atomic
