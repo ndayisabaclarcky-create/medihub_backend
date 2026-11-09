@@ -8,9 +8,15 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import PermissionsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.core.validators import FileExtensionValidator
 
 from core.models import EtablissementScopedModel, uuid_pk_field
 from etablissements.managers import PersonnelManager
+
+
+def valider_taille_photo_medecin(fichier):
+    if fichier.size > 3 * 1024 * 1024:
+        raise ValidationError("La photo du médecin ne peut pas dépasser 3 Mo.")
 
 
 class Etablissement(models.Model):
@@ -179,6 +185,12 @@ class Medecin(models.Model):
         related_name="medecin",
     )
     specialite = models.CharField(max_length=40)
+    photo_profil = models.ImageField(
+        upload_to="medecins/",
+        blank=True,
+        null=True,
+        validators=[FileExtensionValidator(("jpg", "jpeg", "png", "webp")), valider_taille_photo_medecin],
+    )
     matricule_superviseur = models.ForeignKey(
         Personnel,
         on_delete=models.SET_NULL,

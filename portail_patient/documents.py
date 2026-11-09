@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from facturation.models import Facture
 from laboratoire.models import ResultatExamen
 from pharmacie.models import Prescription
+from patients.models import DocumentMedicalPartage
 from portail_patient.models import AccesDocumentPatient
 
 
@@ -86,6 +87,17 @@ def _nom_patient(patient):
 
 
 def _document(type_document, id_document, patient, tenant):
+    if type_document == AccesDocumentPatient.HISTORIQUE_PARTAGE:
+        try:
+            obj = DocumentMedicalPartage.objects.get(
+                pk=id_document,
+                id_etablissement_id=tenant,
+                historique__id_patient_destination=patient,
+            )
+        except DocumentMedicalPartage.DoesNotExist as exc:
+            raise Http404 from exc
+        return obj, []
+
     if type_document == AccesDocumentPatient.RESULTAT:
         try:
             obj = ResultatExamen.objects.select_related(
@@ -201,6 +213,19 @@ def lister_documents(patient):
         }
         for obj in factures
     )
+    documents.extend(
+        {
+            "type_document": AccesDocumentPatient.HISTORIQUE_PARTAGE,
+            "id_document": str(obj.pk),
+            "titre": obj.titre,
+            "date": obj.date_document,
+            "id_hopital_source": str(obj.historique.id_etablissement_source),
+        }
+        for obj in DocumentMedicalPartage.objects.filter(
+            id_etablissement_id=tenant,
+            historique__id_patient_destination=patient,
+        ).select_related("historique")
+    )
     return sorted(documents, key=lambda item: (item["date"] or timezone.localdate(), item["titre"]), reverse=True)
 
 
@@ -215,7 +240,7 @@ def reponse_document(*, patient, type_document, id_document, telecharger):
         id_document=id_document,
         action=AccesDocumentPatient.TELECHARGEMENT if telecharger else AccesDocumentPatient.CONSULTATION,
     )
-    contenu = generer_pdf(LABELS[type_document], lignes)
+    contenu = bytes(objet.contenu_pdf) if type_document == AccesDocumentPatient.HISTORIQUE_PARTAGE else generer_pdf(LABELS[type_document], lignes)
     nom = f"medihub-{type_document}-{id_document}.pdf"
     response = FileResponse(
         BytesIO(contenu),

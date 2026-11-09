@@ -63,10 +63,12 @@ class AccesDocumentPatient(ValidateOnSaveMixin, EtablissementScopedModel):
     RESULTAT = "resultat_examen"
     PRESCRIPTION = "prescription"
     FACTURE = "facture"
+    HISTORIQUE_PARTAGE = "historique_partage"
     TYPE_CHOICES = [
         (RESULTAT, "Résultat d'examen"),
         (PRESCRIPTION, "Prescription"),
         (FACTURE, "Facture"),
+        (HISTORIQUE_PARTAGE, "Document d'historique partagé"),
     ]
 
     id_acces = uuid_pk_field()

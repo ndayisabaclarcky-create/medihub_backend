@@ -7,12 +7,13 @@ from rest_framework.views import APIView
 
 from core.api import RolePermission, validation_api
 from etablissements.models import Etablissement
-from patients.models import Assurance, Client, Patient, PartageDossier, Telephone
+from patients.models import Assurance, Client, MesurePoids, Patient, PartageDossier, Telephone
 from patients.serializers import (
     AssuranceSerializer,
     ClientSerializer,
     CorrespondanceSerializer,
     PatientSerializer,
+    MesurePoidsSerializer,
     PartageDossierSerializer,
     TelephoneSerializer,
 )
@@ -77,7 +78,9 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         _hopital_courant(self.request)
-        return Patient.objects.select_related("id_assurance").prefetch_related("telephones").all()
+        return Patient.objects.select_related(
+            "id_assurance", "medecin_referent__matricule_personnel"
+        ).prefetch_related("telephones", "mesures_poids", "historiques_medicaux_recus__documents").all()
 
     def perform_create(self, serializer):
         if self.request.user.id_etablissement.type_etablissement != Etablissement.TYPE_HOPITAL:
@@ -85,6 +88,26 @@ class PatientViewSet(viewsets.ModelViewSet):
 
             raise PermissionDenied("Les patients ne peuvent être gérés que dans un hôpital.")
         serializer.save(id_etablissement_id=self.request.user.id_etablissement_id)
+
+    @action(detail=True, methods=("post",), url_path="mesures-poids")
+    def mesures_poids(self, request, id_patient=None):
+        patient = self.get_object()
+        if request.user.role_metier not in ("administrateur", "medecin", "infirmier"):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied("Seul le personnel soignant peut enregistrer une mesure de poids.")
+        serializer = MesurePoidsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            mesure = MesurePoids.objects.create(
+                **serializer.validated_data,
+                id_patient=patient,
+                matricule_personnel=request.user,
+                id_etablissement_id=request.user.id_etablissement_id,
+            )
+        except DjangoValidationError as exc:
+            raise validation_api(exc) from exc
+        return Response(MesurePoidsSerializer(mesure).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("get",), url_path="correspondances")
     def correspondances(self, request, id_patient=None):

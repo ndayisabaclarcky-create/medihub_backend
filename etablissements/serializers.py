@@ -103,6 +103,7 @@ class PersonnelSerializer(serializers.ModelSerializer):
     specialite = serializers.CharField(max_length=40, write_only=True, required=False)
     matricule_superviseur = serializers.UUIDField(write_only=True, required=False, allow_null=True)
     specialite_medecin = serializers.SerializerMethodField()
+    photo_profil = serializers.ImageField(required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = Personnel
@@ -110,6 +111,7 @@ class PersonnelSerializer(serializers.ModelSerializer):
             "matricule_personnel", "nom", "prenom", "email_professionnel", "role_metier",
             "date_embauche", "identifiant_connexion", "role_acces", "actif", "password",
             "specialite", "matricule_superviseur", "specialite_medecin",
+            "photo_profil",
         )
         read_only_fields = ("matricule_personnel", "actif", "specialite_medecin")
 
@@ -131,7 +133,9 @@ class PersonnelSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"specialite": "La spécialité est obligatoire pour un médecin."})
         if self.instance and role != self.instance.role_metier:
             raise serializers.ValidationError({"role_metier": "Le rôle métier ne peut pas être modifié par cette API."})
-        if role != "medecin" and (attrs.get("specialite") or attrs.get("matricule_superviseur")):
+        if role != "medecin" and (
+            attrs.get("specialite") or attrs.get("matricule_superviseur") or attrs.get("photo_profil")
+        ):
             raise serializers.ValidationError({"specialite": "Les champs médecin ne sont acceptés que pour un médecin."})
         superviseur = attrs.get("matricule_superviseur")
         if superviseur:
@@ -149,6 +153,7 @@ class PersonnelSerializer(serializers.ModelSerializer):
         password = validated_data.pop("password")
         specialite = validated_data.pop("specialite", None)
         superviseur = validated_data.pop("matricule_superviseur", None)
+        photo_profil = validated_data.pop("photo_profil", None)
         etablissement = self.context["request"].user.id_etablissement
         personnel = Personnel.objects.create_user(
             password=password,
@@ -160,6 +165,7 @@ class PersonnelSerializer(serializers.ModelSerializer):
                 matricule_personnel=personnel,
                 specialite=specialite,
                 matricule_superviseur_id=superviseur,
+                photo_profil=photo_profil,
             )
         return personnel
 
@@ -168,6 +174,7 @@ class PersonnelSerializer(serializers.ModelSerializer):
         password = validated_data.pop("password", None)
         specialite = validated_data.pop("specialite", None)
         superviseur = validated_data.pop("matricule_superviseur", serializers.empty)
+        photo_profil = validated_data.pop("photo_profil", serializers.empty)
         for key, value in validated_data.items():
             setattr(instance, key, value)
         if password:
@@ -179,6 +186,7 @@ class PersonnelSerializer(serializers.ModelSerializer):
                 defaults={
                     **({"specialite": specialite} if specialite is not None else {}),
                     **({"matricule_superviseur_id": superviseur} if superviseur is not serializers.empty else {}),
+                    **({"photo_profil": photo_profil} if photo_profil is not serializers.empty else {}),
                 },
             )
         return instance
@@ -188,10 +196,11 @@ class MedecinSerializer(serializers.ModelSerializer):
     nom = serializers.CharField(source="matricule_personnel.nom", read_only=True)
     prenom = serializers.CharField(source="matricule_personnel.prenom", read_only=True)
     id_etablissement = serializers.UUIDField(source="matricule_personnel.id_etablissement_id", read_only=True)
+    photo_profil = serializers.ImageField(read_only=True)
 
     class Meta:
         model = Medecin
-        fields = ("matricule_personnel", "nom", "prenom", "id_etablissement", "specialite", "matricule_superviseur")
+        fields = ("matricule_personnel", "nom", "prenom", "id_etablissement", "specialite", "photo_profil", "matricule_superviseur")
         read_only_fields = fields
 
 
