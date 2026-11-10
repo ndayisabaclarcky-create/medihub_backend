@@ -164,7 +164,7 @@ npm run dev:portal
 
 Le personnel est servi par Vite sur `http://localhost:5173`, le portail patient par Next.js sur `http://localhost:3000` et l'API sur `http://localhost:8000`. Les deux frontends ont déjà une URL API locale par défaut ; leurs fichiers `.env.example` permettent de la remplacer. Django doit autoriser les deux origines dans `CORS_ALLOWED_ORIGINS` et `CSRF_TRUSTED_ORIGINS`, avec `CORS_ALLOW_CREDENTIALS=True`. Le `.env.example` du backend contient ces deux origines.
 
-Les sessions du personnel et du compte patient peuvent coexister dans le navigateur. Les cookies et les jetons CSRF doivent être envoyés par les deux interfaces. Seuls la connexion du personnel, les dossiers patients, l'historique partagé reçu et le parcours du portail patient sont actuellement raccordés au backend. Plusieurs écrans d'opérations du personnel (consultations, hospitalisations, laboratoire, pharmacie et facturation) restent des démonstrations locales et ne doivent pas être considérés comme des écritures serveur.
+Les sessions du personnel et du compte patient peuvent coexister dans le navigateur. Les cookies et les jetons CSRF doivent ?tre envoy?s par les deux interfaces. Le backend est raccord? pour la connexion du personnel, la gestion des membres, le tableau de bord, les rendez-vous, les dossiers patients et le portail patient. Les ?crans de consultations, hospitalisations, laboratoire, pharmacie et facturation restent des d?monstrations locales et ne doivent pas ?tre consid?r?s comme des ?critures serveur.
 
 ### Compte patient et partage entre hôpitaux
 
