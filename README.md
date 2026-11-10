@@ -166,6 +166,26 @@ Le personnel est servi par Vite sur `http://localhost:5173`, le portail patient 
 
 Les sessions du personnel et du compte patient peuvent coexister dans le navigateur. Les cookies et les jetons CSRF doivent être envoyés par les deux interfaces. L’espace du personnel est raccordé aux API pour les patients, rendez-vous, consultations et ordonnances, admissions et sorties, laboratoire, pharmacie (catalogue, lots et ventes), facturation (émission et paiements), personnel et tableau de bord. La facturation propose au comptable une liste minimale des épisodes clôturés à facturer. Les partenariats et les équipements restent disponibles dans l’API backend, mais leurs écrans frontend ne sont pas encore intégrés.
 
+### Démarrer tout MediHub avec Docker
+
+Docker Desktop doit être lancé. Ce dépôt contient le `Dockerfile` de l'API et le `docker-compose.yml` qui démarre PostgreSQL, le backend Django, l'espace du personnel et le portail patient. Pour cette commande locale, garde `MediHub_Backend` et `MediHub_Frontend` côte à côte dans le même dossier.
+
+```powershell
+Copy-Item .env.docker.example .env.docker
+```
+
+Ouvre `.env.docker`, remplace les secrets d'exemple, puis lance depuis la racine de `MediHub_Backend` :
+
+```powershell
+docker compose --env-file .env.docker up --build
+```
+
+Les services seront disponibles sur `http://localhost:8000` (API), `http://localhost:5173` (personnel) et `http://localhost:3000` (portail patient). PostgreSQL et les fichiers médias locaux sont conservés dans des volumes Docker. Le script `scripts/db_setup.sql` crée le rôle applicatif `medihub_app` sans privilège de contournement de la Row-Level Security ; cette initialisation ne se rejoue pas tant que le volume PostgreSQL existe.
+
+Le conteneur backend applique les migrations au démarrage, collecte les fichiers statiques Django et lance Gunicorn avec un worker pour limiter la mémoire. Pour créer le premier hôpital et son compte administrateur, ouvre le shell dans le conteneur avec `docker compose --env-file .env.docker exec backend python manage.py shell`, puis exécute le code Python de la section précédente. Journaux : `docker compose --env-file .env.docker logs -f backend`. `docker compose down` arrête les services sans supprimer les données.
+
+Pour Railway, chaque service se construit depuis le dépôt correspondant : backend avec `Dockerfile`, personnel avec `staff/Dockerfile`, portail patient avec `patient-portal/Dockerfile`. Les frontends doivent recevoir l'URL publique du backend aux arguments de build `VITE_API_BASE_URL` et `NEXT_PUBLIC_API_BASE_URL`. Le backend doit autoriser leurs domaines dans `CORS_ALLOWED_ORIGINS` et `ALLOWED_HOSTS`. Le PostgreSQL Railway devra initialiser le rôle `medihub_app` avec `NOBYPASSRLS` ; Django ne doit pas se connecter en superutilisateur. La configuration des variables de production sera nécessaire avant le déploiement.
+
 ### Compte patient et partage entre hôpitaux
 
 Le patient peut créer un compte indépendant, confirmer son numéro par code, puis se connecter avec identifiant et mot de passe suivi d'un code à usage unique. Chaque rendez-vous dans un nouvel hôpital crée un dossier local séparé. Depuis son compte, le patient peut choisir un dossier source, un hôpital de destination où il a déjà un dossier, donner son consentement explicite, puis partager une copie figée du résumé médical et des résultats, prescriptions ou factures sélectionnés. Les dossiers restent propres à chaque hôpital ; le partage reçu est un instantané consultable par le patient et l'équipe soignante du nouvel hôpital. Les urgences sans compte restent enregistrables par le personnel comme auparavant.
