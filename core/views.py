@@ -46,5 +46,10 @@ class SessionAPIView(APIView):
     def delete(self, request):
         if not request.user.is_authenticated:
             return Response(status=status.HTTP_204_NO_CONTENT)
+        # Preserve the patient account session shared by the localhost frontends.
+        portal_compte = request.session.get("portail_compte_patient_id")
         logout(request)
+        if portal_compte:
+            request.session["portail_compte_patient_id"] = portal_compte
+            request.session.set_expiry(30 * 60)
         return Response(status=status.HTTP_204_NO_CONTENT)

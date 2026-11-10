@@ -62,7 +62,7 @@ class SessionPatientValide(BasePermission):
 
 class SessionComptePatientValide(BasePermission):
     def has_permission(self, request, view):
-        return bool(not request.user.is_authenticated and request.session.get("portail_compte_patient_id"))
+        return bool(request.session.get("portail_compte_patient_id"))
 
 
 def _reponse_code_compte(challenge, code):
@@ -149,14 +149,15 @@ class SessionPortailAPIView(APIView):
 
     @method_decorator(ensure_csrf_cookie)
     def get(self, request):
-        if request.user.is_authenticated:
-            return Response({"authenticated": False, "mode": "personnel"})
         compte_id = request.session.get("portail_compte_patient_id")
         if compte_id:
             compte = ComptePatient.objects.filter(
                 pk=compte_id, actif=True, telephone_verifie=True
             ).first()
             if compte is None:
+                if request.user.is_authenticated:
+                    request.session.pop("portail_compte_patient_id", None)
+                    return Response({"authenticated": False, "mode": "personnel"})
                 request.session.flush()
                 return Response({"authenticated": False})
             return Response({
@@ -169,6 +170,8 @@ class SessionPortailAPIView(APIView):
                     "prenom": compte.prenom,
                 },
             })
+        if request.user.is_authenticated:
+            return Response({"authenticated": False, "mode": "personnel"})
         patient_id = request.session.get("portail_patient_id")
         id_hopital = request.session.get("portail_hopital_id")
         if not patient_id or not id_hopital:

@@ -141,21 +141,44 @@ Pour le déploiement, ajoute les origines HTTPS exactes à `CORS_ALLOWED_ORIGINS
 Les collections et réglages Postman locaux ne sont pas nécessaires à l’exécution du backend et ne sont pas inclus dans le dépôt. Crée une collection locale et n’y exporte jamais de mot de passe, cookie de session ou secret réel.
 
 
-### Compte patient et partage entre h?pitaux
 
-Le patient peut cr?er un compte ind?pendant, confirmer son num?ro par code, puis se connecter avec identifiant et mot de passe suivi d'un code ? usage unique. Chaque rendez-vous dans un nouvel h?pital cr?e un dossier local s?par?. Depuis son compte, le patient peut choisir un dossier source, un h?pital de destination o? il a d?j? un dossier, donner son consentement explicite, puis partager une copie fig?e du r?sum? m?dical et des r?sultats, prescriptions ou factures s?lectionn?s. Les dossiers restent propres ? chaque h?pital ; le partage re?u est un instantan? consultable par le patient et l'?quipe soignante du nouvel h?pital. Les urgences sans compte restent enregistrables par le personnel comme auparavant.
+### Démarrer les trois serveurs en local
 
-Routes du compte patient (les requ?tes d'?criture n?cessitent les cookies de session et CSRF) :
+Le dépôt `MediHub_Backend` contient l'API Django. Depuis PowerShell, dans cette racine, applique les migrations puis démarre l'API :
 
-- `POST /api/portail/compte/inscription/` : `identifiant_connexion`, `nom`, `prenom`, `date_naissance`, `sexe`, `numero_telephone`, `password`; allergies/ant?c?dents/groupe sanguin d?clar?s sont facultatifs.
-- `POST /api/portail/compte/codes/verifier/` : `id_code`, `code` re?us apr?s inscription ou connexion.
-- `POST /api/portail/compte/connexion/` : identifiant et mot de passe, puis v?rification du code.
-- `GET /api/portail/compte/dossiers/` : h?pitaux o? le compte a d?j? un dossier local.
-- `GET /api/portail/medecins/?id_hopital={uuid}` : m?decins actifs de cet h?pital.
-- `GET /api/portail/compte/disponibilite/?id_hopital={uuid}&matricule_personnel={uuid}&date_rendez_vous=AAAA-MM-JJ&heure_rendez_vous=HH:MM` : v?rifie un cr?neau.
-- `POST /api/portail/compte/rendez-vous/{id_hopital}/` : `matricule_personnel`, `date_rendez_vous`, `heure_rendez_vous`; cr?e le dossier local si n?cessaire.
-- `POST /api/portail/compte/partages/historique/` : `id_hopital_source`, `id_hopital_destination`, `consentement: true`, et `documents` facultatifs (`type_document` parmi `resultat_examen`, `prescription`, `facture` et `id_document`). Le dossier du patient doit d'abord exister ? l'h?pital destinataire.
-- `GET /api/portail/profil/?id_hopital={uuid}` : profil et instantan?s re?us pour ce dossier.
-- `GET /api/portail/documents/?id_hopital={uuid}` puis `/api/portail/documents/{type_document}/{id_document}/` ou `/telecharger/` : consulter ou t?l?charger les documents, y compris les copies re?ues.
+```powershell
+.\.venv\Scripts\python.exe manage.py migrate
+.\.venv\Scripts\python.exe manage.py runserver 8000
+```
 
-La livraison SMS n'est pas configur?e par ce code. `PORTAIL_CODE_DEMO=True` expose un code simul? uniquement pour le d?veloppement ; avant une d?monstration publique, int?grer un fournisseur SMS, d?sactiver ce mode et configurer les cookies HTTPS/CORS du d?ploiement. Le rapprochement automatique des dossiers d'urgence pr?existants n'est pas fait : un dossier cr?? sans compte doit ?tre li? de fa?on v?rifi?e par l'h?pital avant d'?tre partageable depuis un compte patient.
+Dans deux autres terminaux, depuis la racine du dépôt `MediHub_Frontend`, installe les dépendances une fois puis lance les deux interfaces :
+
+```powershell
+npm ci
+npm run dev:staff
+```
+
+```powershell
+npm run dev:portal
+```
+
+Le personnel est servi par Vite sur `http://localhost:5173`, le portail patient par Next.js sur `http://localhost:3000` et l'API sur `http://localhost:8000`. Les deux frontends ont déjà une URL API locale par défaut ; leurs fichiers `.env.example` permettent de la remplacer. Django doit autoriser les deux origines dans `CORS_ALLOWED_ORIGINS` et `CSRF_TRUSTED_ORIGINS`, avec `CORS_ALLOW_CREDENTIALS=True`. Le `.env.example` du backend contient ces deux origines.
+
+Les sessions du personnel et du compte patient peuvent coexister dans le navigateur. Les cookies et les jetons CSRF doivent être envoyés par les deux interfaces. Seuls la connexion du personnel, les dossiers patients, l'historique partagé reçu et le parcours du portail patient sont actuellement raccordés au backend. Plusieurs écrans d'opérations du personnel (consultations, hospitalisations, laboratoire, pharmacie et facturation) restent des démonstrations locales et ne doivent pas être considérés comme des écritures serveur.
+
+### Compte patient et partage entre hôpitaux
+
+Le patient peut créer un compte indépendant, confirmer son numéro par code, puis se connecter avec identifiant et mot de passe suivi d'un code à usage unique. Chaque rendez-vous dans un nouvel hôpital crée un dossier local séparé. Depuis son compte, le patient peut choisir un dossier source, un hôpital de destination où il a déjà un dossier, donner son consentement explicite, puis partager une copie figée du résumé médical et des résultats, prescriptions ou factures sélectionnés. Les dossiers restent propres à chaque hôpital ; le partage reçu est un instantané consultable par le patient et l'équipe soignante du nouvel hôpital. Les urgences sans compte restent enregistrables par le personnel comme auparavant.
+
+Routes du compte patient (les requêtes d'écriture nécessitent les cookies de session et CSRF) :
+
+- `POST /api/portail/compte/inscription/` : identifiant, nom, prénom, date de naissance, sexe, téléphone, mot de passe ; allergies, antécédents et groupe sanguin déclarés sont facultatifs.
+- `POST /api/portail/compte/connexion/`, puis `POST /api/portail/compte/codes/verifier/` : connexion et validation du code.
+- `GET /api/portail/compte/dossiers/` : hôpitaux où le compte a déjà un dossier local.
+- `GET /api/portail/medecins/?id_hopital={uuid}` : médecins actifs de l'hôpital choisi.
+- `GET /api/portail/compte/disponibilite/?id_hopital={uuid}&matricule_personnel={uuid}&date_rendez_vous=AAAA-MM-JJ&heure_rendez_vous=HH:MM` : vérifie un créneau.
+- `POST /api/portail/compte/rendez-vous/{id_hopital}/` : réserve le créneau et crée le dossier local si nécessaire.
+- `POST /api/portail/compte/partages/historique/` : envoie le résumé consenti et les documents choisis. Le dossier du patient doit d'abord exister à l'hôpital destinataire.
+- `GET /api/portail/profil/?id_hopital={uuid}` et `GET /api/portail/documents/?id_hopital={uuid}` : consulte le profil, les partages reçus et les documents du dossier local.
+
+La livraison SMS réelle n'est pas configurée. `PORTAIL_CODE_DEMO=True` expose un code simulé uniquement pour le développement ; avant une démonstration publique, intégrer un fournisseur SMS, désactiver ce mode et configurer les cookies HTTPS/CORS du déploiement. Un dossier d'urgence créé sans compte doit être lié de façon vérifiée par l'hôpital avant de pouvoir être partagé depuis un compte patient.
