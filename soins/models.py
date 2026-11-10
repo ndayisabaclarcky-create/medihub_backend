@@ -61,6 +61,7 @@ class RendezVous(ValidateOnSaveMixin, EtablissementScopedModel):
     id_rdv = uuid_pk_field()
     date_rendez_vous = models.DateField()
     heure_rendez_vous = models.TimeField()
+    motif = models.CharField(max_length=200, blank=True)
     statut_rendez_vous = models.CharField(max_length=10, choices=STATUT_CHOICES, default=PLANIFIE)
     id_patient = models.ForeignKey(
         Patient,

@@ -53,6 +53,11 @@ class TableauDeBordAPIView(APIView):
             resultat["soins"] = {
                 "rendez_vous": rdv.count(),
                 "rendez_vous_planifies": rdv.filter(statut_rendez_vous=RendezVous.PLANIFIE).count(),
+                "rendez_vous_a_venir": RendezVous.objects.filter(
+                    id_etablissement_id=tenant,
+                    date_rendez_vous__gte=timezone.localdate(),
+                    statut_rendez_vous=RendezVous.PLANIFIE,
+                ).count(),
                 "rendez_vous_annules": rdv.filter(statut_rendez_vous=RendezVous.ANNULE).count(),
                 "consultations": Consultation.objects.filter(
                     id_etablissement_id=tenant, id_acte__date_acte__range=(debut, fin)

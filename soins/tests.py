@@ -13,6 +13,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from core.testing import RLSTestCase
 from etablissements.models import Etablissement, Medecin, Personnel, Service
@@ -219,6 +220,7 @@ class RendezVousTests(BaseBloc3):
         with self.assertRaises(ValidationError):
             self.nouveau_rdv(datetime.time(10, 0), statut_rendez_vous="zzz")
 
+
     def test_medecin_d_un_autre_hopital_refuse(self):
         with self.assertRaises(ValidationError):
             self.nouveau_rdv(datetime.time(11, 0), matricule_personnel=self.medecin_b)
@@ -231,6 +233,44 @@ class RendezVousTests(BaseBloc3):
         with self.assertRaises(ValidationError) as cm:
             rdv.save()
         self.assertIn("id_etablissement", cm.exception.message_dict)
+
+class RendezVousAPITests(BaseBloc3):
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.client.force_login(self.medecin_a.matricule_personnel)
+
+    def test_creation_persiste_le_motif_et_rafraichit_l_agenda_et_les_statistiques(self):
+        date_rdv = timezone.localdate() + datetime.timedelta(days=1)
+        response = self.client.post(
+            "/api/soins/rendez-vous/",
+            {
+                "id_patient": str(self.patient_a.pk),
+                "matricule_personnel": str(self.medecin_a.pk),
+                "date_rendez_vous": date_rdv.isoformat(),
+                "heure_rendez_vous": "10:00",
+                "motif": "Consultation de controle",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["motif"], "Consultation de controle")
+        self.assertEqual(response.data["patient"], {"nom": "Alpha", "prenom": "Jean"})
+        self.assertEqual(response.data["medecin"]["nom"], "Nom")
+        rendez_vous = RendezVous.objects.get(pk=response.data["id_rdv"])
+        self.assertEqual(rendez_vous.id_etablissement_id, self.hopital_a.pk)
+        self.assertEqual(rendez_vous.motif, "Consultation de controle")
+
+        agenda = self.client.get("/api/soins/rendez-vous/")
+        self.assertEqual(agenda.status_code, 200)
+        self.assertTrue(any(item["id_rdv"] == str(rendez_vous.pk) for item in agenda.data))
+
+        statistiques = self.client.get("/api/statistiques/")
+        self.assertEqual(statistiques.status_code, 200)
+        self.assertGreaterEqual(statistiques.data["soins"]["rendez_vous_a_venir"], 1)
+
+
 
 
 class RendezVousAnnulationRG07Tests(BaseBloc3):

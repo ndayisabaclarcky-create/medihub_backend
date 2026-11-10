@@ -6,14 +6,23 @@ from soins.models import Acte, Chambre, Consultation, Hospitalisation, Lit, Rend
 class RendezVousSerializer(serializers.ModelSerializer):
     id_patient = serializers.UUIDField(source="id_patient_id", read_only=True)
     matricule_personnel = serializers.UUIDField(source="matricule_personnel_id", read_only=True)
+    patient = serializers.SerializerMethodField()
+    medecin = serializers.SerializerMethodField()
 
     class Meta:
         model = RendezVous
         fields = (
             "id_rdv", "date_rendez_vous", "heure_rendez_vous", "statut_rendez_vous",
-            "id_patient", "matricule_personnel",
+            "id_patient", "matricule_personnel", "motif", "patient", "medecin",
         )
-        read_only_fields = ("id_rdv", "statut_rendez_vous", "id_patient", "matricule_personnel")
+        read_only_fields = ("id_rdv", "statut_rendez_vous", "id_patient", "matricule_personnel", "patient", "medecin")
+
+    def get_patient(self, obj):
+        return {"nom": obj.id_patient.nom_patient, "prenom": obj.id_patient.prenom_patient}
+
+    def get_medecin(self, obj):
+        personnel = obj.matricule_personnel.matricule_personnel
+        return {"nom": personnel.nom, "prenom": personnel.prenom, "specialite": obj.matricule_personnel.specialite}
 
 
 class RendezVousCreateSerializer(serializers.Serializer):
@@ -21,6 +30,7 @@ class RendezVousCreateSerializer(serializers.Serializer):
     heure_rendez_vous = serializers.TimeField()
     id_patient = serializers.UUIDField()
     matricule_personnel = serializers.UUIDField(required=False)
+    motif = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
 
 
 class ActeSerializer(serializers.ModelSerializer):

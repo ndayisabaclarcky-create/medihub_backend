@@ -82,6 +82,7 @@ class RendezVousViewSet(viewsets.GenericViewSet):
             rendez_vous = RendezVous.objects.create(
                 date_rendez_vous=entree.validated_data["date_rendez_vous"],
                 heure_rendez_vous=entree.validated_data["heure_rendez_vous"],
+                motif=entree.validated_data.get("motif", ""),
                 id_patient_id=entree.validated_data["id_patient"],
                 matricule_personnel_id=medecin_id,
                 id_etablissement_id=request.user.id_etablissement_id,
