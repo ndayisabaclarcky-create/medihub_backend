@@ -27,13 +27,20 @@ from pharmacie.services import (
 
 class RolePermission(BasePermission):
     role_requis = ()
+    type_etablissement_requis = "pharmacie"
 
     def has_permission(self, request, view):
         user = request.user
         return bool(
             user
             and user.is_authenticated
-            and (user.is_superuser or user.role_metier in self.role_requis)
+            and (
+                user.is_superuser
+                or (
+                    user.role_metier in self.role_requis
+                    and user.id_etablissement.type_etablissement == self.type_etablissement_requis
+                )
+            )
         )
 
 
@@ -47,6 +54,26 @@ class PharmacienOnly(RolePermission):
 
 class MedecinOnly(RolePermission):
     role_requis = ("medecin",)
+    type_etablissement_requis = "hopital"
+
+
+class CatalogueMedecinOuPharmacie(RolePermission):
+    role_requis = ("medecin", "pharmacien", "administrateur")
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        return bool(
+            user.role_metier in self.role_requis
+            and (
+                user.id_etablissement.type_etablissement == "pharmacie"
+                or user.role_metier in ("medecin", "administrateur")
+                and user.id_etablissement.type_etablissement == "hopital"
+            )
+        )
 
 
 def _message_validation(exc):
@@ -62,6 +89,11 @@ class MedicamentViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated, PharmacienOuAdmin)
     queryset = Medicament.objects.all().order_by("nom_medicament", "code_medicament")
     http_method_names = ("get", "post", "put", "patch", "head", "options")
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated(), CatalogueMedecinOuPharmacie()]
+        return super().get_permissions()
 
     def perform_create(self, serializer):
         serializer.save(id_etablissement_id=self.request.user.id_etablissement_id)
@@ -112,6 +144,11 @@ class PrescriptionListCreateView(APIView):
 
 class VenteListCreateView(APIView):
     permission_classes = (IsAuthenticated, PharmacienOnly)
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated(), PharmacienOuAdmin()]
+        return super().get_permissions()
 
     def get(self, request):
         lignes = LigneVente.objects.select_related("id_medicament", "id_lot")

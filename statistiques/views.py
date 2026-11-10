@@ -45,7 +45,12 @@ class TableauDeBordAPIView(APIView):
         entree.is_valid(raise_exception=True)
         debut, fin = entree.validated_data["date_debut"], entree.validated_data["date_fin"]
         tenant = request.user.id_etablissement_id
-        domaines = self.domaines_par_role.get(request.user.role_metier, set())
+        type_etablissement = request.user.id_etablissement.type_etablissement
+        if type_etablissement == "pharmacie":
+            # Une pharmacie indépendante ne consulte que ses indicateurs de stock et de ventes.
+            domaines = {"pharmacie"} if request.user.role_metier in ("administrateur", "pharmacien") else set()
+        else:
+            domaines = self.domaines_par_role.get(request.user.role_metier, set()) - {"pharmacie"}
         resultat = {"date_debut": debut, "date_fin": fin}
 
         if "soins" in domaines:

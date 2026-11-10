@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Copie .env.docker.example vers .env.docker et configure les mots de passe}
+      POSTGRES_DB: postgres
+      DB_PASSWORD: ${DB_PASSWORD:?Configure DB_PASSWORD dans .env.docker}
+    volumes:
+      - medihub-postgres:/var/lib/postgresql/data
+      - ./scripts/db_setup.sql:/opt/medihub-db-setup.sql:ro
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/00-medihub.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  backend:
+    build: .
+    env_file: .env.docker
+    environment:
+      DB_HOST: postgres
+      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - medihub-media:/app/media
+
+  staff:
+    build:
+      context: ../MediHub_Frontend
+      dockerfile: staff/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "5173:8080"
+
+  patient-portal:
+    build:
+      context: ../MediHub_Frontend
+      dockerfile: patient-portal/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  medihub-postgres:
+  medihub-media:

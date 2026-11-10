@@ -129,6 +129,17 @@ class PersonnelSerializer(serializers.ModelSerializer):
         role = attrs.get("role_metier", getattr(self.instance, "role_metier", None))
         if self.instance is None and not attrs.get("password"):
             raise serializers.ValidationError({"password": "Le mot de passe est obligatoire à la création."})
+        if self.instance is None:
+            type_etablissement = self.context["request"].user.id_etablissement.type_etablissement
+            roles_autorises = (
+                {"medecin", "infirmier", "secretaire", "comptable", "technicien_labo"}
+                if type_etablissement == Etablissement.TYPE_HOPITAL
+                else {"pharmacien"}
+            )
+            if role == "administrateur":
+                raise serializers.ValidationError({"role_metier": "La création d’un administrateur est réservée à l’administrateur de plateforme."})
+            if role not in roles_autorises:
+                raise serializers.ValidationError({"role_metier": "Ce rôle ne peut pas être ajouté dans cet établissement."})
         if role == "medecin" and not (attrs.get("specialite") or self.instance and self.get_specialite_medecin(self.instance)):
             raise serializers.ValidationError({"specialite": "La spécialité est obligatoire pour un médecin."})
         if self.instance and role != self.instance.role_metier:
