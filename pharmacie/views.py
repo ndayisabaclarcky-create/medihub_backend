@@ -49,6 +49,10 @@ class MedecinOnly(RolePermission):
     role_requis = ("medecin",)
 
 
+class CatalogueMedecinOuPharmacie(RolePermission):
+    role_requis = ("medecin", "pharmacien", "administrateur")
+
+
 def _message_validation(exc):
     if isinstance(exc, DjangoValidationError):
         if hasattr(exc, "message_dict"):
@@ -62,6 +66,11 @@ class MedicamentViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated, PharmacienOuAdmin)
     queryset = Medicament.objects.all().order_by("nom_medicament", "code_medicament")
     http_method_names = ("get", "post", "put", "patch", "head", "options")
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated(), CatalogueMedecinOuPharmacie()]
+        return super().get_permissions()
 
     def perform_create(self, serializer):
         serializer.save(id_etablissement_id=self.request.user.id_etablissement_id)

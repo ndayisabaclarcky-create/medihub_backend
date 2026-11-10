@@ -10,6 +10,7 @@ from etablissements.models import Etablissement
 from facturation.models import Facture, Paiement
 from facturation.serializers import FactureSerializer, GenererFactureSerializer, PaiementCreateSerializer, PaiementSerializer
 from facturation.services import FacturationError, enregistrer_paiement, generer_facture
+from soins.models import Consultation
 
 
 class ComptableOuAdmin(RolePermission):
@@ -46,6 +47,31 @@ class FactureViewSet(viewsets.ReadOnlyModelViewSet):
         except (DjangoValidationError, FacturationError) as exc:
             raise validation_api(exc) from exc
         return Response(self.get_serializer(facture).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=("get",), url_path="episodes-a-facturer")
+    def episodes_a_facturer(self, request):
+        """Expose au personnel de caisse le minimum requis pour émettre une facture."""
+        self._verifier_hopital()
+        episodes = (
+            Consultation.objects.filter(
+                id_etablissement_id=request.user.id_etablissement_id,
+                statut_episode=Consultation.CLOS,
+                facture__isnull=True,
+            )
+            .select_related("id_acte__id_patient")
+            .order_by("-id_acte__date_acte")
+        )
+        return Response([
+            {
+                "id_acte": str(episode.pk),
+                "id_patient": str(episode.id_acte.id_patient_id),
+                "nom_patient": episode.id_acte.id_patient.nom_patient,
+                "prenom_patient": episode.id_acte.id_patient.prenom_patient,
+                "date_acte": episode.id_acte.date_acte,
+                "libelle_acte": episode.id_acte.libelle_acte,
+            }
+            for episode in episodes
+        ])
 
     @action(detail=True, methods=("get", "post"), url_path="paiements")
     def paiements(self, request, id_facture=None):

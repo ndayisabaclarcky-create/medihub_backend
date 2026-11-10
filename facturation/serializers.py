@@ -37,13 +37,17 @@ class FactureSerializer(serializers.ModelSerializer):
     solde_patient = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     lignes = LigneFactureSerializer(many=True, read_only=True)
     paiements = PaiementSerializer(many=True, read_only=True)
+    patient = serializers.SerializerMethodField()
+
+    def get_patient(self, obj):
+        return {"nom": obj.id_patient.nom_patient, "prenom": obj.id_patient.prenom_patient}
 
     class Meta:
         model = Facture
         fields = (
             "id_facture", "date_emission", "id_patient", "id_acte_consultation", "statut_facture",
             "montant_total", "taux_prise_en_charge", "montant_assurance", "montant_patient",
-            "total_paye", "solde_patient", "lignes", "paiements",
+            "total_paye", "solde_patient", "lignes", "paiements", "patient",
         )
         read_only_fields = fields
 
