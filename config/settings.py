@@ -155,17 +155,18 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     o.strip()
     for o in os.environ.get(
-        "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"
+        "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:5174"
     ).split(",")
     if o.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 CSRF_COOKIE_DOMAIN = os.environ.get("CSRF_COOKIE_DOMAIN") or None
-# Frontend and API are on separate Railway subdomains, so production cookies
-# must be sent on cross-site fetch requests. Keep Lax for local development.
-SESSION_COOKIE_SAMESITE = os.environ.get("SESSION_COOKIE_SAMESITE", "Lax" if DEBUG else "None")
-CSRF_COOKIE_SAMESITE = os.environ.get("CSRF_COOKIE_SAMESITE", "Lax" if DEBUG else "None")
+# Localhost frontends and the API are same-site even when their ports differ.
+# Use None only when a shared cross-subdomain cookie domain is configured.
+_COOKIE_SAMESITE_DEFAULT = "None" if CSRF_COOKIE_DOMAIN else "Lax"
+SESSION_COOKIE_SAMESITE = os.environ.get("SESSION_COOKIE_SAMESITE", _COOKIE_SAMESITE_DEFAULT)
+CSRF_COOKIE_SAMESITE = os.environ.get("CSRF_COOKIE_SAMESITE", _COOKIE_SAMESITE_DEFAULT)
 SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", str(not DEBUG)) == "True"
 CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", str(not DEBUG)) == "True"
 
