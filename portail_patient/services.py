@@ -13,7 +13,7 @@ from core.db.rls import current_tenant, temporary_tenant
 from etablissements.models import Etablissement, Medecin
 from patients.models import CodeComptePatient, ComptePatient, Patient, Telephone
 from portail_patient.models import CodeVerification
-from soins.models import RendezVous
+from soins.models import DisponibiliteMedecin, RendezVous
 
 
 class PortailPatientError(Exception):
@@ -226,10 +226,26 @@ def prendre_rendez_vous(*, patient, id_hopital, matricule_medecin, date_rendez_v
         matricule_personnel__actif=True,
     ).exists():
         raise ValidationError({"matricule_personnel": "Ce médecin n'exerce pas dans cet hôpital."})
+    configure = False
+    for plage in DisponibiliteMedecin.objects.filter(
+        id_etablissement_id=id_hopital,
+        matricule_personnel_id=matricule_medecin,
+        date_disponibilite=date_rendez_vous,
+        heure_debut__lte=heure_rendez_vous,
+    ):
+        debut = datetime.combine(date_rendez_vous, plage.heure_debut)
+        fin_creneau = datetime.combine(date_rendez_vous, heure_rendez_vous) + timedelta(minutes=plage.duree_creneau)
+        fin_plage = datetime.combine(date_rendez_vous, plage.heure_fin)
+        ecart = (datetime.combine(date_rendez_vous, heure_rendez_vous) - debut).total_seconds() / 60
+        if fin_creneau <= fin_plage and ecart >= 0 and ecart % plage.duree_creneau == 0:
+            configure = True
+            break
+    if not configure:
+        raise ValidationError({"heure_rendez_vous": "Ce créneau n'est pas proposé par l'accueil pour ce médecin."})
     return RendezVous.objects.create(
         date_rendez_vous=date_rendez_vous,
         heure_rendez_vous=heure_rendez_vous,
-        statut_rendez_vous=RendezVous.PLANIFIE,
+        statut_rendez_vous=RendezVous.EN_ATTENTE,
         id_patient=patient,
         matricule_personnel_id=matricule_medecin,
         id_etablissement_id=id_hopital,

@@ -4,6 +4,8 @@ from rest_framework.routers import DefaultRouter
 from portail_patient.views import (
     DemanderCodeAPIView,
     DossiersComptePatientAPIView,
+    RendezVousComptePatientAPIView,
+    CreneauxComptePatientAPIView,
     InscriptionComptePatientAPIView,
     ConnexionComptePatientAPIView,
     DisponibiliteNouveauHopitalAPIView,
@@ -43,6 +45,8 @@ urlpatterns = [
     path("compte/connexion/", ConnexionComptePatientAPIView.as_view(), name="connexion-compte-patient"),
     path("compte/codes/verifier/", VerifierCodeComptePatientAPIView.as_view(), name="verifier-code-compte-patient"),
     path("compte/dossiers/", DossiersComptePatientAPIView.as_view(), name="dossiers-compte-patient"),
+    path("compte/rendez-vous/", RendezVousComptePatientAPIView.as_view(), name="rendez-vous-compte-patient"),
+    path("compte/creneaux/", CreneauxComptePatientAPIView.as_view(), name="creneaux-compte-patient"),
     path("compte/disponibilite/", DisponibiliteNouveauHopitalAPIView.as_view(), name="disponibilite-nouvel-hopital"),
     path("compte/rendez-vous/<uuid:id_hopital>/", RendezVousNouveauHopitalAPIView.as_view(), name="rendez-vous-nouvel-hopital"),
     path("compte/partages/historique/", PartagerHistoriquePatientAPIView.as_view(), name="partager-historique-patient"),

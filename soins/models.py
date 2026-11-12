@@ -51,17 +51,22 @@ class RendezVous(ValidateOnSaveMixin, EtablissementScopedModel):
     HONORE = "honore"
     ANNULE = "annule"
     ABSENT = "absent"
+    EN_ATTENTE = "en_attente"
+    REFUSE = "refuse"
     STATUT_CHOICES = [
         (PLANIFIE, "Planifié"),
         (HONORE, "Honoré"),
         (ANNULE, "Annulé"),
         (ABSENT, "Absent"),
+        (EN_ATTENTE, "En attente de validation"),
+        (REFUSE, "Refusé"),
     ]
 
     id_rdv = uuid_pk_field()
     date_rendez_vous = models.DateField()
     heure_rendez_vous = models.TimeField()
     motif = models.CharField(max_length=200, blank=True)
+    motif_refus = models.CharField(max_length=250, blank=True)
     statut_rendez_vous = models.CharField(max_length=10, choices=STATUT_CHOICES, default=PLANIFIE)
     id_patient = models.ForeignKey(
         Patient,
@@ -86,12 +91,12 @@ class RendezVous(ValidateOnSaveMixin, EtablissementScopedModel):
             # annulé libère le créneau (sinon il resterait bloqué pour toujours).
             models.UniqueConstraint(
                 fields=["matricule_personnel", "date_rendez_vous", "heure_rendez_vous"],
-                condition=~models.Q(statut_rendez_vous="annule"),
+                condition=~models.Q(statut_rendez_vous__in=["annule", "refuse"]),
                 name="uniq_rdv_medecin_creneau_actif",
                 violation_error_message="Ce médecin a déjà un rendez-vous sur ce créneau (RG05).",
             ),
             models.CheckConstraint(
-                condition=models.Q(statut_rendez_vous__in=["planifie", "honore", "annule", "absent"]),
+                condition=models.Q(statut_rendez_vous__in=["planifie", "honore", "annule", "absent", "en_attente", "refuse"]),
                 name="chk_rdv_statut",
             ),
         ]
@@ -135,6 +140,49 @@ class RendezVous(ValidateOnSaveMixin, EtablissementScopedModel):
         etab_medecin = _etablissement_du_medecin(self.matricule_personnel_id)
         if etab_medecin is not None and etab_medecin != self.id_etablissement_id:
             raise ValidationError("Le médecin doit appartenir au même établissement que le rendez-vous.")
+
+
+class DisponibiliteMedecin(ValidateOnSaveMixin, EtablissementScopedModel):
+    """Plage de consultation publiée par l'accueil pour un médecin et une date."""
+
+    id_disponibilite = uuid_pk_field()
+    matricule_personnel = models.ForeignKey(
+        Medecin, on_delete=models.PROTECT, db_column="matricule_personnel", related_name="disponibilites"
+    )
+    date_disponibilite = models.DateField()
+    heure_debut = models.TimeField()
+    heure_fin = models.TimeField()
+    duree_creneau = models.PositiveSmallIntegerField(default=30, choices=((15, "15 minutes"), (30, "30 minutes"), (60, "60 minutes")))
+
+    class Meta:
+        db_table = "disponibilite_medecin"
+        verbose_name = "Disponibilité médecin"
+        verbose_name_plural = "Disponibilités médecins"
+        ordering = ("date_disponibilite", "heure_debut")
+        constraints = [
+            models.CheckConstraint(condition=models.Q(heure_fin__gt=models.F("heure_debut")), name="chk_dispo_heures"),
+            models.UniqueConstraint(fields=("matricule_personnel", "date_disponibilite", "heure_debut", "heure_fin"), name="uniq_dispo_medecin_plage"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.date_disponibilite and self.date_disponibilite < timezone.localdate():
+            raise ValidationError({"date_disponibilite": "La disponibilité doit être aujourd'hui ou dans le futur."})
+        if self.heure_debut and self.heure_fin and self.heure_fin <= self.heure_debut:
+            raise ValidationError({"heure_fin": "L'heure de fin doit suivre l'heure de début."})
+        if self.id_etablissement_id and self.matricule_personnel_id:
+            etablissement = _etablissement_du_medecin(self.matricule_personnel_id)
+            if etablissement is not None and etablissement != self.id_etablissement_id:
+                raise ValidationError({"matricule_personnel": "Le médecin doit exercer dans cet établissement."})
+        if self.pk and self.id_etablissement_id and self.date_disponibilite and self.heure_debut and self.heure_fin:
+            chevauchement = DisponibiliteMedecin.objects.filter(
+                matricule_personnel_id=self.matricule_personnel_id,
+                date_disponibilite=self.date_disponibilite,
+                heure_debut__lt=self.heure_fin,
+                heure_fin__gt=self.heure_debut,
+            ).exclude(pk=self.pk).exists()
+            if chevauchement:
+                raise ValidationError({"heure_debut": "Cette plage chevauche une disponibilité déjà configurée."})
 
 
 

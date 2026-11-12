@@ -12,18 +12,20 @@ from rest_framework.response import Response
 from core.api import RolePermission, validation_api
 from etablissements.models import Etablissement, Medecin
 from patients.models import Patient
-from soins.models import Acte, Chambre, Consultation, Hospitalisation, Lit, RendezVous
+from soins.models import Acte, Chambre, Consultation, DisponibiliteMedecin, Hospitalisation, Lit, RendezVous
 from soins.serializers import (
     ActeSerializer,
     AffectationLitSerializer,
     ChambreSerializer,
     ConsultationCreateSerializer,
     ConsultationSerializer,
+    DisponibiliteMedecinSerializer,
     HospitalisationCreateSerializer,
     HospitalisationSerializer,
     LitSerializer,
     RendezVousCreateSerializer,
     RendezVousSerializer,
+    RefuserRendezVousSerializer,
 )
 
 
@@ -43,6 +45,10 @@ class AdministrateurHopital(RolePermission):
     role_requis = ("administrateur",)
 
 
+class AccueilOuAdmin(RolePermission):
+    role_requis = ("administrateur", "secretaire")
+
+
 def _hopital_courant(request):
     if request.user.id_etablissement.type_etablissement != Etablissement.TYPE_HOPITAL:
         raise PermissionDenied("Cette API est réservée aux hôpitaux.")
@@ -56,7 +62,10 @@ class RendezVousViewSet(viewsets.GenericViewSet):
 
     def get_queryset(self):
         _hopital_courant(self.request)
-        return super().get_queryset()
+        queryset = super().get_queryset()
+        if self.action in ("confirmer", "refuser"):
+            queryset = queryset.select_for_update()
+        return queryset
 
     def list(self, request):
         return Response(self.get_serializer(self.get_queryset().order_by("date_rendez_vous", "heure_rendez_vous"), many=True).data)
@@ -101,6 +110,62 @@ class RendezVousViewSet(viewsets.GenericViewSet):
         except DjangoValidationError as exc:
             raise validation_api(exc) from exc
         return Response(self.get_serializer(rendez_vous).data)
+
+    @action(detail=True, methods=("post",), url_path="confirmer", permission_classes=(IsAuthenticated, AccueilOuAdmin))
+    @transaction.atomic
+    def confirmer(self, request, id_rdv=None):
+        rendez_vous = self.get_object()
+        if rendez_vous.statut_rendez_vous != RendezVous.EN_ATTENTE:
+            raise serializers.ValidationError({"statut_rendez_vous": "Seule une demande en attente peut être confirmée."})
+        rendez_vous.statut_rendez_vous = RendezVous.PLANIFIE
+        rendez_vous.motif_refus = ""
+        rendez_vous.save(update_fields=("statut_rendez_vous", "motif_refus"))
+        return Response(self.get_serializer(rendez_vous).data)
+
+    @action(detail=True, methods=("post",), url_path="refuser", permission_classes=(IsAuthenticated, AccueilOuAdmin))
+    @transaction.atomic
+    def refuser(self, request, id_rdv=None):
+        rendez_vous = self.get_object()
+        if rendez_vous.statut_rendez_vous != RendezVous.EN_ATTENTE:
+            raise serializers.ValidationError({"statut_rendez_vous": "Seule une demande en attente peut être refusée."})
+        entree = RefuserRendezVousSerializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+        rendez_vous.statut_rendez_vous = RendezVous.REFUSE
+        rendez_vous.motif_refus = entree.validated_data["motif_refus"]
+        rendez_vous.save(update_fields=("statut_rendez_vous", "motif_refus"))
+        return Response(self.get_serializer(rendez_vous).data)
+
+
+class DisponibiliteMedecinViewSet(viewsets.ModelViewSet):
+    serializer_class = DisponibiliteMedecinSerializer
+    permission_classes = (IsAuthenticated, AccueilOuAdmin)
+    lookup_field = "id_disponibilite"
+    queryset = DisponibiliteMedecin.objects.select_related("matricule_personnel__matricule_personnel")
+    http_method_names = ("get", "post", "delete", "head", "options")
+
+    def get_queryset(self):
+        _hopital_courant(self.request)
+        return super().get_queryset().filter(id_etablissement_id=self.request.user.id_etablissement_id)
+
+    def perform_create(self, serializer):
+        _hopital_courant(self.request)
+        try:
+            serializer.save(id_etablissement_id=self.request.user.id_etablissement_id)
+        except DjangoValidationError as exc:
+            raise validation_api(exc) from exc
+
+    def destroy(self, request, *args, **kwargs):
+        disponibilite = self.get_object()
+        # Ne pas effacer une plage qui contient déjà une demande ou un rendez-vous.
+        if RendezVous.objects.filter(
+            matricule_personnel_id=disponibilite.matricule_personnel_id,
+            date_rendez_vous=disponibilite.date_disponibilite,
+            heure_rendez_vous__gte=disponibilite.heure_debut,
+            heure_rendez_vous__lt=disponibilite.heure_fin,
+        ).exclude(statut_rendez_vous__in=(RendezVous.ANNULE, RendezVous.REFUSE)).exists():
+            raise serializers.ValidationError("Cette plage contient déjà un rendez-vous. Elle ne peut pas être supprimée.")
+        disponibilite.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ActeViewSet(viewsets.ReadOnlyModelViewSet):

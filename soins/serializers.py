@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from soins.models import Acte, Chambre, Consultation, Hospitalisation, Lit, RendezVous
+from soins.models import Acte, Chambre, Consultation, DisponibiliteMedecin, Hospitalisation, Lit, RendezVous
 
 
 class RendezVousSerializer(serializers.ModelSerializer):
@@ -13,9 +13,9 @@ class RendezVousSerializer(serializers.ModelSerializer):
         model = RendezVous
         fields = (
             "id_rdv", "date_rendez_vous", "heure_rendez_vous", "statut_rendez_vous",
-            "id_patient", "matricule_personnel", "motif", "patient", "medecin",
+            "id_patient", "matricule_personnel", "motif", "motif_refus", "patient", "medecin",
         )
-        read_only_fields = ("id_rdv", "statut_rendez_vous", "id_patient", "matricule_personnel", "patient", "medecin")
+        read_only_fields = ("id_rdv", "statut_rendez_vous", "motif_refus", "id_patient", "matricule_personnel", "patient", "medecin")
 
     def get_patient(self, obj):
         return {"nom": obj.id_patient.nom_patient, "prenom": obj.id_patient.prenom_patient}
@@ -31,6 +31,23 @@ class RendezVousCreateSerializer(serializers.Serializer):
     id_patient = serializers.UUIDField()
     matricule_personnel = serializers.UUIDField(required=False)
     motif = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
+
+class DisponibiliteMedecinSerializer(serializers.ModelSerializer):
+    medecin = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DisponibiliteMedecin
+        fields = ("id_disponibilite", "matricule_personnel", "date_disponibilite", "heure_debut", "heure_fin", "duree_creneau", "medecin")
+        read_only_fields = ("id_disponibilite", "medecin")
+
+    def get_medecin(self, obj):
+        personnel = obj.matricule_personnel.matricule_personnel
+        return {"nom": personnel.nom, "prenom": personnel.prenom, "specialite": obj.matricule_personnel.specialite}
+
+
+class RefuserRendezVousSerializer(serializers.Serializer):
+    motif_refus = serializers.CharField(max_length=250, trim_whitespace=True)
 
 
 class ActeSerializer(serializers.ModelSerializer):

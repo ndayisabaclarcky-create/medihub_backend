@@ -4,6 +4,7 @@ from soins.views import (
     ActeViewSet,
     ChambreViewSet,
     ConsultationViewSet,
+    DisponibiliteMedecinViewSet,
     HospitalisationViewSet,
     LitViewSet,
     RendezVousViewSet,
@@ -12,6 +13,7 @@ from soins.views import (
 
 router = DefaultRouter()
 router.register("rendez-vous", RendezVousViewSet, basename="rendez-vous")
+router.register("disponibilites", DisponibiliteMedecinViewSet, basename="disponibilite-medecin")
 router.register("actes", ActeViewSet, basename="acte")
 router.register("consultations", ConsultationViewSet, basename="consultation")
 router.register("chambres", ChambreViewSet, basename="chambre")

@@ -158,7 +158,7 @@ class RendezVousPortailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RendezVous
-        fields = ("id_rdv", "date_rendez_vous", "heure_rendez_vous", "statut_rendez_vous", "medecin")
+        fields = ("id_rdv", "date_rendez_vous", "heure_rendez_vous", "statut_rendez_vous", "motif_refus", "motif", "medecin")
         read_only_fields = fields
 
     def get_medecin(self, obj):
@@ -179,3 +179,8 @@ class PrendreRendezVousSerializer(serializers.Serializer):
 
 class DisponibiliteSerializer(PrendreRendezVousSerializer):
     pass
+
+
+class DisponibilitesJourSerializer(serializers.Serializer):
+    matricule_personnel = serializers.UUIDField()
+    date_rendez_vous = serializers.DateField()

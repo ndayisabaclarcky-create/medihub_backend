@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager, nullcontext
 
 from django.conf import settings
@@ -23,6 +23,7 @@ from portail_patient.serializers import (
     ConnexionComptePatientSerializer,
     DemandeCodeSerializer,
     DisponibiliteSerializer,
+    DisponibilitesJourSerializer,
     InscriptionComptePatientSerializer,
     PartagerHistoriqueSerializer,
     MedecinPortailSerializer,
@@ -48,7 +49,7 @@ from portail_patient.services import (
     verifier_code,
     verifier_code_compte_patient,
 )
-from soins.models import RendezVous
+from soins.models import DisponibiliteMedecin, RendezVous
 
 
 class SessionPatientValide(BasePermission):
@@ -274,6 +275,73 @@ class DossiersComptePatientAPIView(APIView):
         return Response(dossiers)
 
 
+class RendezVousComptePatientAPIView(APIView):
+    permission_classes = (SessionComptePatientValide,)
+
+    def get(self, request):
+        compte = ComptePatient.objects.get(pk=request.session["portail_compte_patient_id"], actif=True, telephone_verifie=True)
+        resultats = []
+        hopitaux = Etablissement.objects.filter(type_etablissement=Etablissement.TYPE_HOPITAL).order_by("nom_etablissement")
+        with transaction.atomic():
+            for hopital in hopitaux:
+                with temporary_tenant(hopital.pk):
+                    patient = Patient.objects.filter(compte_patient=compte, id_etablissement_id=hopital.pk).only("id_patient").first()
+                    if not patient:
+                        continue
+                    rendez_vous = RendezVous.objects.select_related("matricule_personnel__matricule_personnel").filter(
+                        id_patient=patient
+                    ).order_by("-date_rendez_vous", "-heure_rendez_vous")
+                    for item in rendez_vous:
+                        data = dict(RendezVousPortailSerializer(item).data)
+                        data["nom_hopital"] = hopital.nom_etablissement
+                        resultats.append(data)
+        return Response(resultats)
+
+
+class CreneauxComptePatientAPIView(APIView):
+    permission_classes = (SessionComptePatientValide,)
+
+    def get(self, request):
+        entree = DisponibilitesJourSerializer(data=request.query_params)
+        entree.is_valid(raise_exception=True)
+        id_hopital = request.query_params.get("id_hopital")
+        hopital = Etablissement.objects.filter(pk=id_hopital, type_etablissement=Etablissement.TYPE_HOPITAL).first()
+        if hopital is None or not ComptePatient.objects.filter(
+            pk=request.session["portail_compte_patient_id"], actif=True, telephone_verifie=True
+        ).exists():
+            raise serializers.ValidationError({"id_hopital": "Choisissez un hôpital valide."})
+        valeurs = entree.validated_data
+        with transaction.atomic(), temporary_tenant(hopital.pk):
+            if not medecins_disponibles(id_hopital=hopital.pk).filter(pk=valeurs["matricule_personnel"]).exists():
+                raise serializers.ValidationError({"matricule_personnel": "Ce médecin n'exerce pas dans cet hôpital."})
+            plages = DisponibiliteMedecin.objects.filter(
+                id_etablissement_id=hopital.pk,
+                matricule_personnel_id=valeurs["matricule_personnel"],
+                date_disponibilite=valeurs["date_rendez_vous"],
+            ).order_by("heure_debut")
+            maintenant = timezone.localtime(timezone.now())
+            creneaux = []
+            for plage in plages:
+                heure = datetime.combine(valeurs["date_rendez_vous"], plage.heure_debut)
+                fin = datetime.combine(valeurs["date_rendez_vous"], plage.heure_fin)
+                while heure + timedelta(minutes=plage.duree_creneau) <= fin:
+                    heure_slot = heure.time()
+                    creneau_local = timezone.make_aware(heure, timezone.get_current_timezone())
+                    occupe = RendezVous.objects.filter(
+                        id_etablissement_id=hopital.pk,
+                        matricule_personnel_id=valeurs["matricule_personnel"],
+                        date_rendez_vous=valeurs["date_rendez_vous"],
+                        heure_rendez_vous=heure_slot,
+                    ).exclude(statut_rendez_vous__in=(RendezVous.ANNULE, RendezVous.REFUSE)).exists()
+                    creneaux.append({
+                        "heure": heure_slot.strftime("%H:%M"),
+                        "disponible": creneau_local > maintenant and not occupe,
+                        "raison": "déjà réservé" if occupe else "horaire passé" if creneau_local <= maintenant else "",
+                    })
+                    heure += timedelta(minutes=plage.duree_creneau)
+        return Response({"creneaux": creneaux})
+
+
 @method_decorator(csrf_protect, name="dispatch")
 class RendezVousNouveauHopitalAPIView(APIView):
     permission_classes = (SessionComptePatientValide,)
@@ -447,12 +515,27 @@ class DisponibiliteNouveauHopitalAPIView(APIView):
             )
             if creneau <= timezone.localtime(timezone.now()):
                 return Response({"disponible": False, "raison": "date passée"})
+            configures = DisponibiliteMedecin.objects.filter(
+                id_etablissement_id=hopital.pk,
+                matricule_personnel_id=valeurs["matricule_personnel"],
+                date_disponibilite=valeurs["date_rendez_vous"],
+                heure_debut__lte=valeurs["heure_rendez_vous"],
+                heure_fin__gt=valeurs["heure_rendez_vous"],
+            )
+            heure_dt = datetime.combine(valeurs["date_rendez_vous"], valeurs["heure_rendez_vous"])
+            configure = any(
+                (heure_dt - datetime.combine(valeurs["date_rendez_vous"], plage.heure_debut)).total_seconds() % (plage.duree_creneau * 60) == 0
+                and heure_dt + timedelta(minutes=plage.duree_creneau) <= datetime.combine(valeurs["date_rendez_vous"], plage.heure_fin)
+                for plage in configures
+            )
+            if not configure:
+                return Response({"disponible": False, "raison": "créneau non proposé par l'accueil"})
             occupe = RendezVous.objects.filter(
                 id_etablissement_id=hopital.pk,
                 matricule_personnel_id=valeurs["matricule_personnel"],
                 date_rendez_vous=valeurs["date_rendez_vous"],
                 heure_rendez_vous=valeurs["heure_rendez_vous"],
-            ).exclude(statut_rendez_vous=RendezVous.ANNULE).exists()
+            ).exclude(statut_rendez_vous__in=(RendezVous.ANNULE, RendezVous.REFUSE)).exists()
         return Response({"disponible": not occupe})
 
 
@@ -615,7 +698,7 @@ class RendezVousPortailViewSet(viewsets.GenericViewSet):
             matricule_personnel_id=valeurs["matricule_personnel"],
             date_rendez_vous=valeurs["date_rendez_vous"],
             heure_rendez_vous=valeurs["heure_rendez_vous"],
-        ).exclude(statut_rendez_vous=RendezVous.ANNULE).exists()
+        ).exclude(statut_rendez_vous__in=(RendezVous.ANNULE, RendezVous.REFUSE)).exists()
         return Response({"disponible": not occupe})
 
     @action(detail=True, methods=("post",), url_path="annuler")
